@@ -1,0 +1,238 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Download dependencies
+      run: go mod download
+    
+    - name: Run tests
+      run: go test -v ./...
+    
+    - name: Run go vet
+      run: go vet ./...
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [windows, linux, darwin]
+        goarch: [amd64, arm64]
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Get version
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION=$(git describe --tags --always --dirty)
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
+    
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+        VERSION: ${{ steps.version.outputs.VERSION }}
+      run: |
+        BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+        GIT_COMMIT=$(git rev-parse --short HEAD)
+        LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+        
+        OUTPUT_NAME="ai-prompt-proxy"
+        if [ "$GOOS" = "windows" ]; then
+          OUTPUT_NAME="ai-prompt-proxy.exe"
+        fi
+        
+        OUTPUT_DIR="build/ai-prompt-proxy-${GOOS}-${GOARCH}"
+        mkdir -p $OUTPUT_DIR
+        
+        echo "Building for $GOOS/$GOARCH..."
+        go build -ldflags="$LDFLAGS" -o "$OUTPUT_DIR/$OUTPUT_NAME" .
+        
+        # Copy web files
+        cp -r web "$OUTPUT_DIR/"
+        
+        # Create configs directory
+        mkdir -p "$OUTPUT_DIR/configs"
+        
+        # Create startup scripts
+        if [ "$GOOS" = "windows" ]; then
+          cat > "$OUTPUT_DIR/start.bat" << 'EOF'
+        @echo off
+        echo Starting AI Prompt Proxy...
+        echo Web interface will be available at: http://localhost:8081
+        echo Press Ctrl+C to stop the server
+        ai-prompt-proxy.exe
+        pause
+        EOF
+          
+          cat > "$OUTPUT_DIR/start.ps1" << 'EOF'
+        Write-Host "Starting AI Prompt Proxy..." -ForegroundColor Green
+        Write-Host "Web interface will be available at: http://localhost:8081" -ForegroundColor Yellow
+        Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
+        & ".\ai-prompt-proxy.exe"
+        EOF
+        else
+          cat > "$OUTPUT_DIR/start.sh" << EOF
+        #!/bin/bash
+        echo "Starting AI Prompt Proxy..."
+        echo "Web interface will be available at: http://localhost:8081"
+        echo "Press Ctrl+C to stop the server"
+        ./$OUTPUT_NAME
+        EOF
+          chmod +x "$OUTPUT_DIR/start.sh"
+        fi
+    
+    - name: Create archive
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        VERSION: ${{ steps.version.outputs.VERSION }}
+      run: |
+        mkdir -p dist
+        ARCHIVE_NAME="ai-prompt-proxy-${VERSION}-${GOOS}-${GOARCH}"
+        
+        cd build
+        if [ "$GOOS" = "windows" ]; then
+          zip -r "../dist/${ARCHIVE_NAME}.zip" "ai-prompt-proxy-${GOOS}-${GOARCH}/"
+        else
+          tar -czf "../dist/${ARCHIVE_NAME}.tar.gz" "ai-prompt-proxy-${GOOS}-${GOARCH}/"
+        fi
+        cd ..
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ai-prompt-proxy-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/*
+        retention-days: 30
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+    
+    - name: Prepare release assets
+      run: |
+        mkdir -p release
+        find artifacts -name "*.zip" -o -name "*.tar.gz" | xargs -I {} cp {} release/
+        ls -la release/
+    
+    - name: Get version
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Create release notes
+      run: |
+        cat > release/RELEASE_NOTES.md << EOF
+        # AI Prompt Proxy v${{ steps.version.outputs.VERSION }}
+        
+        ## 🚀 新功能
+        - 多平台支持：Windows、Linux、macOS
+        - 多架构支持：amd64、arm64
+        - 完整的Web管理界面
+        - 模型配置管理
+        - 实时更新时间显示
+        
+        ## 📦 下载说明
+        
+        ### Windows
+        - **Intel/AMD 64位**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-windows-amd64.zip\`
+        - **ARM 64位**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-windows-arm64.zip\`
+        
+        ### Linux
+        - **Intel/AMD 64位**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-linux-amd64.tar.gz\`
+        - **ARM 64位**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-linux-arm64.tar.gz\`
+        
+        ### macOS
+        - **Intel 64位**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-darwin-amd64.tar.gz\`
+        - **Apple Silicon (M1/M2)**: \`ai-prompt-proxy-${{ steps.version.outputs.VERSION }}-darwin-arm64.tar.gz\`
+        
+        ## 🔧 安装说明
+        
+        1. 下载对应平台的压缩包
+        2. 解压到任意目录
+        3. 运行启动脚本：
+           - Windows: 双击 \`start.bat\` 或运行 \`start.ps1\`
+           - Linux/macOS: 运行 \`./start.sh\`
+        4. 打开浏览器访问 http://localhost:8081
+        
+        ## 📋 更新日志
+        
+        请查看 [CHANGELOG.md](CHANGELOG.md) 获取详细的更新日志。
+        
+        ## 🐛 问题反馈
+        
+        如果遇到问题，请在 [Issues](../../issues) 页面提交反馈。
+        EOF
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        body_path: release/RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

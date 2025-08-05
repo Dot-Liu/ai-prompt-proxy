@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Prompt Proxy 管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .slide-up {
+            animation: slideUp 0.4s ease-out;
+        }
+        
+        .scale-in {
+            animation: scaleIn 0.3s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        .modal-backdrop {
+            backdrop-filter: blur(8px);
+            background: rgba(0, 0, 0, 0.4);
+        }
+        
+        .card-hover {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-primary {
+            background: var(--primary-gradient);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: var(--secondary-gradient);
+            box-shadow: 0 4px 15px rgba(240, 147, 251, 0.4);
+        }
+        
+        .btn-success {
+            background: var(--success-gradient);
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+        }
+        
+        .status-badge {
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+        }
+        
+        .status-badge.offline {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.05); }
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .gradient-text {
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .floating-action {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 40;
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .search-container {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .search-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+            transition: left 0.5s;
+        }
+        
+        .search-container:focus-within::before {
+            left: 100%;
+        }
+        
+        .model-card {
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        
+        .model-card:hover {
+            background: linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%);
+        }
+        
+        .type-badge-chat {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+        }
+        
+        .type-badge-image {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+        
+        .type-badge-audio {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+        
+        .type-badge-video {
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            color: white;
+        }
+        
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .tooltip {
+            position: relative;
+        }
+        
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            z-index: 50;
+        }
+        
+        .quick-actions {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+        
+        /* 抽屉动画样式 */
+        .animate-slide-down {
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from { 
+                opacity: 0; 
+                transform: translateY(-10px); 
+                max-height: 0;
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0); 
+                max-height: 500px;
+            }
+        }
+        
+        .rotate-180 {
+            transform: rotate(180deg);
+        }
+        
+        .card-hover:hover .quick-actions {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 导航栏 -->
+    <nav class="glass-effect shadow-2xl border-b border-white/20 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-20">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 relative">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
+                            <i class="fas fa-robot text-xl text-white"></i>
+                        </div>
+                        <div class="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-white animate-pulse"></div>
+                    </div>
+                    <div class="ml-4">
+                        <h1 class="text-2xl font-bold gradient-text">AI Prompt Proxy</h1>
+                        <p class="text-sm text-gray-500">智能模型管理平台</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-6">
+                    <!-- 统计信息卡片 -->
+                    <div class="hidden md:flex items-center space-x-4">
+                        <div class="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2 shadow-lg border border-white/20">
+                            <div class="flex items-center space-x-2">
+                                <span class="status-badge inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                                    <i class="fas fa-circle text-green-400 mr-1.5 text-xs"></i>
+                                    <span id="service-status">运行中</span>
+                                </span>
+                                <div class="text-right">
+                                    <div class="text-xs text-gray-500">模型总数</div>
+                                    <div class="text-lg font-bold text-gray-900" id="total-models">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 操作按钮 -->
+                    <div class="flex items-center space-x-3">
+                        <button id="reload-config" class="tooltip btn-success inline-flex items-center px-4 py-2.5 border border-transparent text-sm font-semibold rounded-xl text-white transition-all duration-300 hover:scale-105" data-tooltip="重新加载配置">
+                            <i class="fas fa-sync-alt mr-2"></i>
+                            <span class="hidden sm:inline">重载配置</span>
+                        </button>
+                        <button id="add-model-nav" class="tooltip btn-primary inline-flex items-center px-4 py-2.5 border border-transparent text-sm font-semibold rounded-xl text-white transition-all duration-300 hover:scale-105" data-tooltip="添加新模型">
+                            <i class="fas fa-plus mr-2"></i>
+                            <span class="hidden sm:inline">添加模型</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区域 -->
+    <main class="max-w-7xl mx-auto py-8 sm:px-6 lg:px-8">
+        <div class="px-4 sm:px-0">
+            <!-- 页面标题和统计 -->
+            <div class="mb-8">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+                    <div class="mb-4 lg:mb-0">
+                        <h2 class="text-3xl font-bold gradient-text mb-2">模型配置管理</h2>
+                        <p class="text-gray-600">管理和配置您的AI模型，支持多种模型类型</p>
+                    </div>
+                    
+                    <!-- 快速统计 -->
+                    <div class="flex items-center space-x-4">
+                        <div class="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg border border-white/20">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-comments text-blue-600"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-500">对话模型</div>
+                                    <div class="text-lg font-bold text-gray-900" id="chat-models-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg border border-white/20">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-image text-purple-600"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-500">图像模型</div>
+                                    <div class="text-lg font-bold text-gray-900" id="image-models-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg border border-white/20">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-microphone text-green-600"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-500">音频模型</div>
+                                    <div class="text-lg font-bold text-gray-900" id="audio-models-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg border border-white/20">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-video text-orange-600"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-gray-500">视频模型</div>
+                                    <div class="text-lg font-bold text-gray-900" id="video-models-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 搜索和筛选区域 -->
+            <div class="mb-8">
+                <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-white/20">
+                    <div class="flex flex-col lg:flex-row gap-4">
+                        <!-- 搜索框 -->
+                        <div class="flex-1">
+                            <div class="search-container relative">
+                                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <i class="fas fa-search text-gray-400"></i>
+                                </div>
+                                <input type="text" id="search-input" class="block w-full pl-12 pr-4 py-3 border-0 rounded-xl bg-gray-50 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-300" placeholder="搜索模型名称、ID或描述...">
+                            </div>
+                        </div>
+                        
+                        <!-- 筛选器 -->
+                        <div class="flex gap-3">
+                            <select id="type-filter" class="px-4 py-3 border-0 bg-gray-50 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-300 min-w-[140px]">
+                                <option value="">所有类型</option>
+                                <option value="chat">💬 对话模型</option>
+                                <option value="image">🖼️ 图像模型</option>
+                                <option value="audio">🎵 音频模型</option>
+                                <option value="video">🎬 视频模型</option>
+                            </select>
+                            
+                            <!-- 排序 -->
+                            <select id="sort-filter" class="px-4 py-3 border-0 bg-gray-50 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-300 min-w-[120px]">
+                                <option value="updated_at" selected>最近更新</option>
+                                <option value="name">按名称</option>
+                                <option value="type">按类型</option>
+                                <option value="recent">最近添加</option>
+                            </select>
+                            
+                            <!-- 添加模型按钮 -->
+                            <button id="add-model" class="btn-primary inline-flex items-center px-6 py-3 border border-transparent text-sm font-semibold rounded-xl text-white transition-all duration-300 hover:scale-105 shadow-lg">
+                                <i class="fas fa-plus mr-2"></i>
+                                添加模型
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模型列表 -->
+            <div id="models-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <!-- 模型卡片将在这里动态生成 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div id="empty-state" class="text-center py-16 hidden">
+                <div class="max-w-md mx-auto">
+                    <div class="w-24 h-24 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <i class="fas fa-robot text-4xl text-indigo-500"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-gray-900 mb-3">暂无模型配置</h3>
+                    <p class="text-gray-500 mb-8 text-lg">开始添加您的第一个AI模型配置，体验智能化管理</p>
+                    <button class="btn-primary inline-flex items-center px-8 py-4 border border-transparent text-base font-semibold rounded-xl text-white transition-all duration-300 hover:scale-105 shadow-lg">
+                        <i class="fas fa-plus mr-3"></i>
+                        添加第一个模型
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 添加/编辑模型模态框 -->
+    <div id="model-modal" class="modal-backdrop fixed inset-0 bg-gradient-to-br from-indigo-900/90 via-purple-900/90 to-pink-900/90 backdrop-blur-sm overflow-y-auto h-full w-full hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="relative w-full max-w-4xl bg-gradient-to-br from-white via-blue-50/50 to-indigo-50/30 rounded-3xl shadow-2xl border border-indigo-200/50 scale-in" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 25%, #e0f2fe 50%, #e3f2fd 75%, #ffffff 100%)">
+                <!-- 模态框头部 -->
+                <div class="flex justify-between items-center p-6 border-b border-gray-200/50">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-robot text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900" id="modal-title">添加模型配置</h3>
+                            <p class="text-sm text-gray-500">配置您的AI模型参数</p>
+                        </div>
+                    </div>
+                    <button id="close-modal" class="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors">
+                        <i class="fas fa-times text-gray-500"></i>
+                    </button>
+                </div>
+                
+                <!-- 模态框内容 -->
+                <div class="p-6">
+                    <form id="model-form" class="space-y-6">
+                        <!-- 基本信息 -->
+                        <div class="rounded-2xl p-6 border border-blue-200/60 shadow-lg" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 25%, #93c5fd 50%, #dbeafe 100%)">
+                            <h4 class="text-lg font-semibold text-blue-900 mb-4 flex items-center">
+                                <i class="fas fa-info-circle text-blue-600 mr-2"></i>
+                                基本信息
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="model-id" class="block text-sm font-semibold text-gray-700 mb-2">模型ID *</label>
+                                    <input type="text" id="model-id" name="id" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="例如: gpt-4">
+                                </div>
+                                <div>
+                                    <label for="model-name" class="block text-sm font-semibold text-gray-700 mb-2">模型名称 *</label>
+                                    <input type="text" id="model-name" name="name" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="例如: GPT-4 Turbo">
+                                </div>
+                                <div>
+                                    <label for="model-target" class="block text-sm font-semibold text-gray-700 mb-2">目标模型 *</label>
+                                    <input type="text" id="model-target" name="target" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="例如: openai">
+                                </div>
+
+                                <div>
+                                    <label for="model-type" class="block text-sm font-semibold text-gray-700 mb-2">模型类型 *</label>
+                                    <select id="model-type" name="type" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)">
+                                        <option value="chat" selected>💬 对话模型</option>
+                                        <option value="image">🖼️ 图像模型</option>
+                                        <option value="audio">🎵 音频模型</option>
+                                        <option value="video">🎬 视频模型</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 连接配置 -->
+                        <div class="rounded-2xl p-6 border border-green-200/60 shadow-lg" style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 25%, #86efac 50%, #dcfce7 100%)">
+                            <h4 class="text-lg font-semibold text-green-900 mb-4 flex items-center">
+                                <i class="fas fa-link text-green-600 mr-2"></i>
+                                连接配置
+                            </h4>
+                            <div>
+                                <label for="model-url" class="block text-sm font-semibold text-gray-700 mb-2">API Prefix Address *</label>
+                                <input type="url" id="model-url" name="url" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="https://api.openapi.com">
+                            </div>
+                        </div>
+                        
+                        <!-- Prompt 配置 -->
+                        <div class="rounded-2xl p-6 border border-purple-200/60 shadow-lg" style="background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 25%, #d8b4fe 50%, #f3e8ff 100%)">
+                            <h4 class="text-lg font-semibold text-purple-900 mb-4 flex items-center">
+                                <i class="fas fa-code text-purple-600 mr-2"></i>
+                                Prompt 配置
+                                <span class="ml-2 text-xs bg-purple-200 text-purple-800 px-2 py-1 rounded-full font-semibold">可选</span>
+                            </h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="model-prompt" class="block text-sm font-semibold text-gray-700 mb-2">Prompt</label>
+                                    <textarea id="model-prompt" name="prompt" rows="4" class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-300 resize-vertical" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="详细描述这个模型的用途、角色定位或使用场景...&#10;&#10;例如：&#10;- 专业的代码助手，擅长多种编程语言&#10;- 创意写作助手，帮助生成故事和文案&#10;- 数据分析专家，提供深度洞察"></textarea>
+                                </div>
+                                
+                                <!-- 高级配置抽屉 -->
+                                <div class="border-t border-purple-200/50 pt-4">
+                                    <button type="button" id="toggle-advanced-prompt" class="flex items-center justify-between w-full px-4 py-3 text-sm font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-xl transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                                        <div class="flex items-center">
+                                            <i class="fas fa-cogs text-purple-600 mr-2"></i>
+                                            <span>高级配置</span>
+                                        </div>
+                                        <i id="advanced-prompt-icon" class="fas fa-chevron-down text-purple-600 transition-transform duration-300"></i>
+                                    </button>
+                                    
+                                    <div id="advanced-prompt-content" class="hidden mt-4 space-y-4 animate-slide-down">
+                                        <div>
+                                            <label for="model-prompt-path" class="block text-sm font-semibold text-gray-700 mb-2">Prompt插入路径</label>
+                                            <input type="text" id="model-prompt-path" name="prompt_path" class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="例如: messages.0.content">
+                                        </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label for="model-prompt-value-type" class="block text-sm font-semibold text-gray-700 mb-2">Prompt值类型</label>
+                                                <select id="model-prompt-value-type" name="prompt_value_type" class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)">
+                                                    <option value="">选择数据类型</option>
+                                                    <option value="string">📝 字符串</option>
+                                                    <option value="object">🗂️ 对象</option>
+                                                    <option value="array">📋 数组</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label for="model-prompt-value" class="block text-sm font-semibold text-gray-700 mb-2">Prompt值</label>
+                                                <textarea id="model-prompt-value" name="prompt_value" rows="3" class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-300 resize-none" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="JSON格式或字符串"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 操作按钮 -->
+                        <div class="flex justify-end space-x-4 pt-6 border-t border-gray-200/50">
+                            <button type="button" id="cancel-modal" class="px-6 py-3 border border-gray-300 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all duration-300">
+                                <i class="fas fa-times mr-2"></i>
+                                取消
+                            </button>
+                            <button type="submit" class="btn-primary px-8 py-3 border border-transparent rounded-xl shadow-lg text-sm font-semibold text-white transition-all duration-300 hover:scale-105">
+                                <i class="fas fa-save mr-2"></i>
+                                保存模型
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除确认模态框 -->
+    <div id="delete-modal" class="modal-backdrop fixed inset-0 bg-gradient-to-br from-red-900/90 via-pink-900/90 to-orange-900/90 backdrop-blur-sm overflow-y-auto h-full w-full hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="relative w-full max-w-md rounded-3xl shadow-2xl border border-red-200/50 scale-in" style="background: linear-gradient(135deg, #ffffff 0%, #fef2f2 25%, #fee2e2 50%, #fecaca 75%, #ffffff 100%)">
+                <div class="p-6">
+                    <div class="text-center">
+                        <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-4">
+                            <i class="fas fa-exclamation-triangle text-2xl text-red-600"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-900 mb-2">确认删除模型</h3>
+                        <div class="mb-6">
+                            <p class="text-gray-600 mb-2">您确定要删除以下模型吗？</p>
+                            <div class="bg-red-50 border border-red-200 rounded-xl p-3">
+                                <p class="text-red-800 font-semibold" id="delete-model-name"></p>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-2">⚠️ 此操作无法撤销，请谨慎操作</p>
+                        </div>
+                        <div class="flex justify-center space-x-4">
+                            <button id="cancel-delete" class="px-6 py-3 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-all duration-300">
+                                <i class="fas fa-times mr-2"></i>
+                                取消
+                            </button>
+                            <button id="confirm-delete" class="px-6 py-3 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 hover:scale-105">
+                                <i class="fas fa-trash mr-2"></i>
+                                确认删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知容器 -->
+    <div id="toast-container" class="fixed top-6 right-6 z-50 space-y-3 max-w-sm">
+        <!-- Toast 消息将在这里动态生成 -->
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
