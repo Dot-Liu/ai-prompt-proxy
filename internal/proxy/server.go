@@ -39,7 +39,7 @@ func (s *Server) Start(port string) error {
 	// 代理所有请求
 	r.Any("/*path", s.proxyHandler)
 
-	return r.Run(":" + port)
+	return r.Run("0.0.0.0:" + port)
 }
 
 // proxyHandler 代理请求处理器

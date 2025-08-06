@@ -137,7 +137,7 @@ func (s *AdminServer) Start(port string) error {
 		}
 	}
 
-	return r.Run(":" + port)
+	return r.Run(fmt.Sprintf(":%s", port))
 }
 
 // corsMiddleware CORS中间件

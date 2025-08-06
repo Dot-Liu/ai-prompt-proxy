@@ -768,13 +768,39 @@ class AIPromptProxyAdmin {
                             <i class="fas fa-globe text-gray-500"></i>
                         </div>
                         <div class="flex-1">
-                            <span class="font-semibold text-gray-700">接入地址:</span>
+                            <div class="flex items-center justify-between">
+                                <span class="font-semibold text-gray-700">接入地址:</span>
+                                <div class="relative">
+                                    <button onclick="app.toggleAccessUrlDropdown('${model.id}')" class="text-xs text-blue-600 hover:text-blue-800 flex items-center">
+                                        <i class="fas fa-list mr-1"></i>
+                                        查看所有选项
+                                        <i class="fas fa-chevron-down ml-1"></i>
+                                    </button>
+                                    <div id="access-url-dropdown-${model.id}" class="hidden absolute right-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                                        <div class="p-3">
+                                            <p class="text-xs text-gray-600 mb-2">选择适合的接入地址:</p>
+                                            ${this.generateAccessUrlExamples(model.url).map((url, index) => `
+                                                <div class="flex items-center justify-between py-1 px-2 hover:bg-gray-50 rounded">
+                                                    <span class="text-xs text-gray-800 break-all flex-1 mr-2">${url}</span>
+                                                    <button onclick="app.copyToClipboard('${url}', '接入地址'); app.toggleAccessUrlDropdown('${model.id}')" class="text-gray-400 hover:text-blue-500">
+                                                        <i class="fas fa-copy text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="flex items-center mt-1">
-                                <p class="text-gray-900 break-all flex-1">${this.generateAccessUrl(model.url)}</p>
-                                <button onclick="app.copyToClipboard('${this.generateAccessUrl(model.url)}', '接入地址')" class="tooltip text-gray-400 hover:text-blue-500 transition-colors duration-200 ml-2" data-tooltip="复制接入地址">
+                                <p class="text-gray-900 break-all flex-1">${this.generateAccessUrlExamples(model.url)[0]}</p>
+                                <button onclick="app.copyToClipboard('${this.generateAccessUrlExamples(model.url)[0]}', '接入地址')" class="tooltip text-gray-400 hover:text-blue-500 transition-colors duration-200 ml-2" data-tooltip="复制接入地址">
                                     <i class="fas fa-copy text-xs"></i>
                                 </button>
                             </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                默认显示localhost地址，点击上方按钮查看更多IP选项
+                            </p>
                         </div>
                     </div>
                     ${model.prompt ? `
@@ -1154,19 +1180,48 @@ class AIPromptProxyAdmin {
 
     generateAccessUrl(serviceProviderUrl) {
         try {
-            // 获取当前浏览器的域名、IP和端口
+            // 获取当前浏览器的协议和端口
             const currentLocation = window.location;
-            const currentOrigin = currentLocation.origin; // 包含协议、域名和端口
+            const protocol = currentLocation.protocol; // http: 或 https:
+            const port = currentLocation.port; // 端口号
             
             // 解析服务商接入地址，提取路径
             const url = new URL(serviceProviderUrl);
             const path = url.pathname;
             
-            // 生成接入地址：当前域名 + 模型请求路径
-            return `${currentOrigin}${path}`;
+            // 构建端口部分
+            const portPart = port ? `:${port}` : '';
+            
+            // 生成通用的接入地址模板，使用 {HOST} 作为占位符
+            // 用户可以将 {HOST} 替换为实际的IP地址或域名
+            return `${protocol}//{HOST}${portPart}${path}`;
         } catch (error) {
             console.error('生成接入地址失败:', error);
             return '无效的服务商地址';
+        }
+    }
+
+    generateAccessUrlExamples(serviceProviderUrl) {
+        try {
+            const currentLocation = window.location;
+            const protocol = currentLocation.protocol;
+            const port = currentLocation.port;
+            const url = new URL(serviceProviderUrl);
+            const path = url.pathname;
+            const portPart = port ? `:${port}` : '';
+            
+            // 生成常用的访问地址示例
+            const examples = [
+                `${protocol}//localhost${portPart}${path}`,
+                `${protocol}//127.0.0.1${portPart}${path}`,
+                `${protocol}//192.168.1.100${portPart}${path}`,
+                `${protocol}//your-domain.com${portPart}${path}`
+            ];
+            
+            return examples;
+        } catch (error) {
+            console.error('生成接入地址示例失败:', error);
+            return [];
         }
     }
 
@@ -1226,6 +1281,11 @@ class AIPromptProxyAdmin {
         }
     }
 
+    // 检查是否支持加密（安全上下文）
+    isSecureContext() {
+        return window.isSecureContext && window.crypto && window.crypto.subtle;
+    }
+
     // RSA加密相关方法
     async getPublicKey() {
         try {
@@ -1247,6 +1307,11 @@ class AIPromptProxyAdmin {
 
     async importPublicKey(pemKey) {
         try {
+            // 检查是否支持加密
+            if (!this.isSecureContext()) {
+                throw new Error('当前环境不支持加密功能');
+            }
+            
             // 移除PEM头尾和换行符
             const pemHeader = "-----BEGIN PUBLIC KEY-----";
             const pemFooter = "-----END PUBLIC KEY-----";
@@ -1280,6 +1345,12 @@ class AIPromptProxyAdmin {
 
     async encryptPassword(password) {
         try {
+            // 检查是否支持加密
+            if (!this.isSecureContext()) {
+                console.warn('当前环境不支持加密，将使用普通登录');
+                return null; // 返回null表示不使用加密
+            }
+            
             // 如果没有公钥，先获取
             if (!this.publicKey) {
                 await this.getPublicKey();
@@ -1306,7 +1377,8 @@ class AIPromptProxyAdmin {
             return encryptedBase64;
         } catch (error) {
             console.error('密码加密失败:', error);
-            throw error;
+            // 如果加密失败，返回null表示使用普通登录
+            return null;
         }
     }
 
@@ -1321,23 +1393,41 @@ class AIPromptProxyAdmin {
         }
 
         try {
-            // 加密密码
-            console.log('正在加密密码...');
-            const encryptedPassword = await this.encryptPassword(password);
-            console.log('密码加密完成');
+            let response, data;
             
-            const response = await fetch(`${this.baseURL}/auth/encrypted-login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    username, 
-                    encrypted_password: encryptedPassword 
-                })
-            });
+            // 尝试加密登录
+            console.log('正在尝试加密登录...');
+            const encryptedPassword = await this.encryptPassword(password);
+            
+            if (encryptedPassword) {
+                // 使用加密登录
+                console.log('使用加密登录');
+                response = await fetch(`${this.baseURL}/auth/encrypted-login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        encrypted_password: encryptedPassword 
+                    })
+                });
+            } else {
+                // 降级到普通登录
+                console.log('降级到普通登录');
+                response = await fetch(`${this.baseURL}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        password 
+                    })
+                });
+            }
 
-            const data = await response.json();
+            data = await response.json();
             console.log('登录响应:', data);
 
             if (data.code === 0) {
@@ -1399,23 +1489,41 @@ class AIPromptProxyAdmin {
         }
 
         try {
-            // 加密密码
-            console.log('正在加密密码...');
-            const encryptedPassword = await this.encryptPassword(password);
-            console.log('密码加密完成');
+            let response, data;
             
-            const response = await fetch(`${this.baseURL}/auth/encrypted-register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    username, 
-                    encrypted_password: encryptedPassword 
-                })
-            });
+            // 尝试加密注册
+            console.log('正在尝试加密注册...');
+            const encryptedPassword = await this.encryptPassword(password);
+            
+            if (encryptedPassword) {
+                // 使用加密注册
+                console.log('使用加密注册');
+                response = await fetch(`${this.baseURL}/auth/encrypted-register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        encrypted_password: encryptedPassword 
+                    })
+                });
+            } else {
+                // 降级到普通注册
+                console.log('降级到普通注册');
+                response = await fetch(`${this.baseURL}/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        password 
+                    })
+                });
+            }
 
-            const data = await response.json();
+            data = await response.json();
             console.log('安装响应:', data);
 
             if (data.code === 0) {
