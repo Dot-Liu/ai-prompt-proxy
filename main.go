@@ -48,7 +48,10 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		adminServer := admin.NewAdminServerWithService(configService, *configDir)
+		adminServer, err := admin.NewAdminServerWithService(configService, *configDir)
+		if err != nil {
+			log.Fatalf("创建管理API服务器失败: %v", err)
+		}
 		log.Printf("管理API服务器启动在端口 %s", *adminPort)
 		if err := adminServer.Start(*adminPort); err != nil {
 			log.Fatalf("启动管理API服务器失败: %v", err)

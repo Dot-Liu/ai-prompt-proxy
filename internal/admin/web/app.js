@@ -6,19 +6,128 @@ class AIPromptProxyAdmin {
         this.models = [];
         this.filteredModels = [];
         this.currentEditingModel = null;
+        this.token = localStorage.getItem('auth_token');
+        this.isAuthenticated = false;
+        this.publicKey = null;
+        
+        // 用户管理相关属性
+        this.users = [];
+        this.filteredUsers = [];
+        this.currentEditingUser = null;
+        this.currentView = 'models'; // 'models' 或 'users'
+        
         this.init();
     }
 
     init() {
+        this.checkAuthStatus();
+    }
+
+    async checkAuthStatus() {
+        try {
+            // 检查是否首次安装
+            const installResponse = await fetch(`${this.baseURL}/auth/check-install`);
+            const installData = await installResponse.json();
+            
+            if (installData.data.is_first_install) {
+                this.showInstallPage();
+                return;
+            }
+            
+            // 检查是否已登录
+            if (this.token) {
+                try {
+                    const response = await this.apiRequest('/auth/profile');
+                    if (response.code === 0) {
+                        this.isAuthenticated = true;
+                        this.currentUser = response.data; // 存储当前用户信息
+                        this.showMainApp();
+                        this.initMainApp();
+                        return;
+                    }
+                } catch (error) {
+                    // Token无效，清除并显示登录页面
+                    localStorage.removeItem('auth_token');
+                    this.token = null;
+                }
+            }
+            
+            this.showLoginPage();
+        } catch (error) {
+            console.error('检查认证状态失败:', error);
+            this.showLoginPage();
+        }
+    }
+
+    showLoginPage() {
+        document.getElementById('login-page').classList.remove('hidden');
+        document.getElementById('install-page').classList.add('hidden');
+        document.getElementById('main-app').classList.add('hidden');
+        this.bindLoginEvents();
+    }
+
+    showInstallPage() {
+        document.getElementById('login-page').classList.add('hidden');
+        document.getElementById('install-page').classList.remove('hidden');
+        document.getElementById('main-app').classList.add('hidden');
+        this.bindInstallEvents();
+    }
+
+    showMainApp() {
+        console.log('显示主应用页面');
+        const loginPage = document.getElementById('login-page');
+        const installPage = document.getElementById('install-page');
+        const mainApp = document.getElementById('main-app');
+        
+        if (loginPage) {
+            loginPage.classList.add('hidden');
+            console.log('隐藏登录页面');
+        }
+        if (installPage) {
+            installPage.classList.add('hidden');
+            console.log('隐藏安装页面');
+        }
+        if (mainApp) {
+            mainApp.classList.remove('hidden');
+            console.log('显示主应用页面');
+        } else {
+            console.error('找不到主应用页面元素');
+        }
+    }
+
+    initMainApp() {
         this.bindEvents();
+        
+        // 设置默认视图为模型管理
+        this.currentView = 'models';
+        this.showModelManagement();
+        
         this.loadModels();
         this.loadStatus();
+        
+        // 根据用户权限控制界面显示
+        this.setupUserInterface();
         
         // 定期刷新状态
         setInterval(() => this.loadStatus(), 30000);
         
         // 添加工具提示功能
         this.initTooltips();
+    }
+    
+    setupUserInterface() {
+        // 根据用户权限控制用户管理导航按钮的显示
+        const userManagementNav = document.getElementById('user-management-nav');
+        if (userManagementNav) {
+            if (this.currentUser && this.currentUser.is_admin) {
+                userManagementNav.style.display = 'flex';
+            } else {
+                userManagementNav.style.display = 'none';
+            }
+        }
+        
+        // 更新用户信息显示
+        this.updateUserDisplay();
     }
 
     initTooltips() {
@@ -48,106 +157,478 @@ class AIPromptProxyAdmin {
         });
     }
 
+    bindLoginEvents() {
+        const loginForm = document.getElementById('login-form');
+        if (loginForm) {
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleLogin();
+            });
+        }
+    }
+
+    bindInstallEvents() {
+        const installForm = document.getElementById('install-form');
+        if (installForm) {
+            installForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleInstall();
+            });
+        }
+    }
+
     bindEvents() {
-        // 添加模型按钮 - 支持多个按钮
-        document.getElementById('add-model').addEventListener('click', () => {
-            this.openModal();
-        });
+        console.log('开始绑定事件...');
+        
+        try {
+            // 注销按钮
+            const logoutBtn = document.getElementById('logout-btn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', () => {
+                    this.handleLogout();
+                });
+            }
 
-        // 导航栏添加模型按钮
-        const addModelNav = document.getElementById('add-model-nav');
-        if (addModelNav) {
-            addModelNav.addEventListener('click', () => {
-                this.openModal();
+            // 添加模型按钮 - 支持多个按钮
+            const addModelBtn = document.getElementById('add-model');
+            if (addModelBtn) {
+                addModelBtn.addEventListener('click', () => {
+                    this.openModal();
+                });
+            } else {
+                console.warn('未找到add-model按钮');
+            }
+
+            // 添加第一个模型按钮（空状态）
+            const addFirstModelBtn = document.getElementById('add-first-model');
+            if (addFirstModelBtn) {
+                addFirstModelBtn.addEventListener('click', () => {
+                    this.openModal();
+                });
+            }
+
+            // 搜索和筛选功能
+            const searchInput = document.getElementById('search-input');
+            const typeFilter = document.getElementById('type-filter');
+            const sortFilter = document.getElementById('sort-filter');
+
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    this.filterModels();
+                });
+            }
+
+            if (typeFilter) {
+                typeFilter.addEventListener('change', () => {
+                    this.filterModels();
+                });
+            }
+
+            if (sortFilter) {
+                sortFilter.addEventListener('change', () => {
+                    this.filterModels();
+                });
+            }
+
+            // 导航栏模型管理按钮
+            const modelManagementNav = document.getElementById('model-management-nav');
+            if (modelManagementNav) {
+                modelManagementNav.addEventListener('click', () => {
+                    this.showModelManagement();
+                });
+            }
+
+            // 导航栏添加模型按钮（保持兼容性）
+            const addModelNav = document.getElementById('add-model-nav');
+            if (addModelNav) {
+                addModelNav.addEventListener('click', () => {
+                    this.openModal();
+                });
+            }
+
+            // 模态框关闭
+            const closeModal = document.getElementById('close-modal');
+            if (closeModal) {
+                closeModal.addEventListener('click', () => {
+                    this.closeModal();
+                });
+            }
+            
+            const cancelModal = document.getElementById('cancel-modal');
+            if (cancelModal) {
+                cancelModal.addEventListener('click', () => {
+                    this.closeModal();
+                });
+            }
+
+            // 删除模态框
+            const cancelDelete = document.getElementById('cancel-delete');
+            if (cancelDelete) {
+                cancelDelete.addEventListener('click', () => {
+                    this.closeDeleteModal();
+                });
+            }
+            
+            const confirmDelete = document.getElementById('confirm-delete');
+            if (confirmDelete) {
+                confirmDelete.addEventListener('click', () => {
+                    this.confirmDelete();
+                });
+            }
+
+            // 表单提交
+            const modelForm = document.getElementById('model-form');
+            if (modelForm) {
+                modelForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.saveModel();
+                });
+            }
+
+
+
+
+
+            // 模型类型变化时的处理
+            const modelType = document.getElementById('model-type');
+            if (modelType) {
+                modelType.addEventListener('change', (e) => {
+                    this.handleModelTypeChange(e.target.value);
+                });
+            }
+
+            // 点击模态框外部关闭
+            const modelModal = document.getElementById('model-modal');
+            if (modelModal) {
+                modelModal.addEventListener('click', (e) => {
+                    if (e.target.id === 'model-modal') {
+                        this.closeModal();
+                    }
+                });
+            }
+            
+            const deleteModal = document.getElementById('delete-modal');
+            if (deleteModal) {
+                deleteModal.addEventListener('click', (e) => {
+                    if (e.target.id === 'delete-modal') {
+                        this.closeDeleteModal();
+                    }
+                });
+            }
+
+            // 高级配置抽屉展开/收起
+            document.addEventListener('click', (e) => {
+                if (e.target.id === 'toggle-advanced-prompt' || e.target.closest('#toggle-advanced-prompt')) {
+                    this.toggleAdvancedPromptConfig();
+                }
             });
+
+            // 用户下拉菜单事件绑定
+            this.bindUserDropdownEvents();
+
+            // 用户管理相关事件绑定
+            this.bindUserManagementEvents();
+            
+            console.log('事件绑定完成');
+        } catch (error) {
+            console.error('绑定事件时出错:', error);
         }
+    }
 
-        // 模态框关闭
-        document.getElementById('close-modal').addEventListener('click', () => {
-            this.closeModal();
-        });
-        document.getElementById('cancel-modal').addEventListener('click', () => {
-            this.closeModal();
-        });
+    bindUserDropdownEvents() {
+        try {
+            // 用户菜单按钮
+            const userMenuButton = document.getElementById('user-menu-button');
+            const userDropdownMenu = document.getElementById('user-dropdown-menu');
+            const dropdownArrow = document.getElementById('dropdown-arrow');
 
-        // 删除模态框
-        document.getElementById('cancel-delete').addEventListener('click', () => {
-            this.closeDeleteModal();
-        });
-        document.getElementById('confirm-delete').addEventListener('click', () => {
-            this.confirmDelete();
-        });
+            if (userMenuButton && userDropdownMenu) {
+                userMenuButton.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleUserDropdown();
+                });
 
-        // 表单提交
-        document.getElementById('model-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.saveModel();
-        });
+                // 点击页面其他地方关闭下拉菜单
+                document.addEventListener('click', (e) => {
+                    if (!userMenuButton.contains(e.target) && !userDropdownMenu.contains(e.target)) {
+                        this.closeUserDropdown();
+                    }
+                });
+            }
 
-        // 搜索和筛选
-        document.getElementById('search-input').addEventListener('input', (e) => {
-            this.filterModels();
-        });
-        document.getElementById('type-filter').addEventListener('change', (e) => {
-            this.filterModels();
-        });
+            // 修改密码按钮
+            const changePasswordBtn = document.getElementById('change-password-btn');
+            if (changePasswordBtn) {
+                changePasswordBtn.addEventListener('click', () => {
+                    this.closeUserDropdown();
+                    this.openChangePasswordModal();
+                });
+            }
 
-        // 排序功能
-        const sortFilter = document.getElementById('sort-filter');
-        if (sortFilter) {
-            sortFilter.addEventListener('change', () => {
-                this.filterModels();
+            console.log('用户下拉菜单事件绑定完成');
+        } catch (error) {
+            console.error('绑定用户下拉菜单事件时出错:', error);
+        }
+    }
+
+    toggleUserDropdown() {
+        const userDropdownMenu = document.getElementById('user-dropdown-menu');
+        const dropdownArrow = document.getElementById('dropdown-arrow');
+        
+        if (userDropdownMenu && dropdownArrow) {
+            const isHidden = userDropdownMenu.classList.contains('hidden');
+            
+            if (isHidden) {
+                userDropdownMenu.classList.remove('hidden');
+                // 强制重绘以确保动画正常
+                userDropdownMenu.offsetHeight;
+                userDropdownMenu.classList.add('show');
+                dropdownArrow.classList.add('rotate');
+            } else {
+                userDropdownMenu.classList.remove('show');
+                dropdownArrow.classList.remove('rotate');
+                // 等待动画完成后隐藏元素
+                setTimeout(() => {
+                    if (!userDropdownMenu.classList.contains('show')) {
+                        userDropdownMenu.classList.add('hidden');
+                    }
+                }, 200);
+            }
+        }
+    }
+
+    closeUserDropdown() {
+        const userDropdownMenu = document.getElementById('user-dropdown-menu');
+        const dropdownArrow = document.getElementById('dropdown-arrow');
+        
+        if (userDropdownMenu && dropdownArrow) {
+            userDropdownMenu.classList.remove('show');
+            dropdownArrow.classList.remove('rotate');
+            setTimeout(() => {
+                if (!userDropdownMenu.classList.contains('show')) {
+                    userDropdownMenu.classList.add('hidden');
+                }
+            }, 200);
+        }
+    }
+
+    openChangePasswordModal() {
+        // 清空表单
+        const form = document.getElementById('change-password-form');
+        if (form) {
+            form.reset();
+        }
+        
+        // 显示模态框
+        document.getElementById('change-password-modal').classList.remove('hidden');
+    }
+
+    updateUserDisplay() {
+        if (this.currentUser) {
+            // 更新下拉菜单按钮中的用户信息
+            const userDisplayName = document.getElementById('user-display-name');
+            const userDisplayRole = document.getElementById('user-display-role');
+            const dropdownUserName = document.getElementById('dropdown-user-name');
+            const dropdownUserEmail = document.getElementById('dropdown-user-email');
+
+            if (userDisplayName) {
+                userDisplayName.textContent = this.currentUser.username || '用户';
+            }
+            if (userDisplayRole) {
+                userDisplayRole.textContent = this.currentUser.is_admin ? 'Administrator' : 'User';
+            }
+            if (dropdownUserName) {
+                dropdownUserName.textContent = this.currentUser.username || '用户';
+            }
+            if (dropdownUserEmail) {
+                dropdownUserEmail.textContent = this.currentUser.email || this.currentUser.username + '@example.com';
+            }
+        }
+    }
+
+    bindUserManagementEvents() {
+        try {
+            // 用户管理导航按钮
+            const userManagementNav = document.getElementById('user-management-nav');
+            if (userManagementNav) {
+                userManagementNav.addEventListener('click', () => {
+                    this.showUserManagement();
+                });
+            }
+
+            // 模型管理导航按钮（返回模型管理）
+            const modelManagementNavBtn = document.getElementById('model-management-nav');
+            if (modelManagementNavBtn) {
+                modelManagementNavBtn.addEventListener('click', () => {
+                    this.showModelManagement();
+                });
+            }
+
+
+
+            // 添加用户按钮
+            const addUserBtn = document.getElementById('add-user');
+            if (addUserBtn) {
+                addUserBtn.addEventListener('click', () => {
+                    this.openUserModal();
+                });
+            }
+
+            // 添加第一个用户按钮（空状态页面）
+            const addFirstUserBtn = document.getElementById('add-first-user');
+            if (addFirstUserBtn) {
+                addFirstUserBtn.addEventListener('click', () => {
+                    this.openUserModal();
+                });
+            }
+
+            // 用户模态框关闭按钮
+            const closeUserModalBtn = document.getElementById('close-user-modal');
+            if (closeUserModalBtn) {
+                closeUserModalBtn.addEventListener('click', () => {
+                    this.closeUserModal();
+                });
+            }
+
+            // 用户模态框取消按钮
+            const cancelUserModalBtn = document.getElementById('cancel-user-modal');
+            if (cancelUserModalBtn) {
+                cancelUserModalBtn.addEventListener('click', () => {
+                    this.closeUserModal();
+                });
+            }
+
+            // 用户表单提交
+            const userForm = document.getElementById('user-form');
+            if (userForm) {
+                userForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.saveUser();
+                });
+            }
+
+            // 生成密码按钮
+            const generatePasswordBtn = document.getElementById('generate-password');
+            if (generatePasswordBtn) {
+                generatePasswordBtn.addEventListener('click', () => {
+                    this.generatePassword();
+                });
+            }
+
+            // 复制密码按钮
+            const copyPasswordBtn = document.getElementById('copy-password');
+            if (copyPasswordBtn) {
+                copyPasswordBtn.addEventListener('click', () => {
+                    this.copyPassword();
+                });
+            }
+
+            // 删除用户模态框关闭按钮
+            const closeDeleteUserModalBtn = document.getElementById('close-delete-user-modal');
+            if (closeDeleteUserModalBtn) {
+                closeDeleteUserModalBtn.addEventListener('click', () => {
+                    this.closeDeleteUserModal();
+                });
+            }
+
+            // 删除用户模态框取消按钮
+            const cancelDeleteUserBtn = document.getElementById('cancel-delete-user');
+            if (cancelDeleteUserBtn) {
+                cancelDeleteUserBtn.addEventListener('click', () => {
+                    this.closeDeleteUserModal();
+                });
+            }
+
+            // 确认删除用户按钮
+            const confirmDeleteUserBtn = document.getElementById('confirm-delete-user');
+            if (confirmDeleteUserBtn) {
+                confirmDeleteUserBtn.addEventListener('click', () => {
+                    this.confirmDeleteUser();
+                });
+            }
+
+            // 修改密码模态框关闭按钮
+            const closeChangePasswordModalBtn = document.getElementById('close-change-password-modal');
+            if (closeChangePasswordModalBtn) {
+                closeChangePasswordModalBtn.addEventListener('click', () => {
+                    this.closeChangePasswordModal();
+                });
+            }
+
+            // 修改密码模态框取消按钮
+            const cancelChangePasswordBtn = document.getElementById('cancel-change-password');
+            if (cancelChangePasswordBtn) {
+                cancelChangePasswordBtn.addEventListener('click', () => {
+                    this.closeChangePasswordModal();
+                });
+            }
+
+            // 修改密码表单提交
+            const changePasswordForm = document.getElementById('change-password-form');
+            if (changePasswordForm) {
+                changePasswordForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.savePassword();
+                });
+            }
+
+            // 点击模态框外部关闭用户相关模态框
+            document.addEventListener('click', (e) => {
+                if (e.target.id === 'user-modal') {
+                    this.closeUserModal();
+                }
+                if (e.target.id === 'delete-user-modal') {
+                    this.closeDeleteUserModal();
+                }
+                if (e.target.id === 'change-password-modal') {
+                    this.closeChangePasswordModal();
+                }
             });
+
+            console.log('用户管理事件绑定完成');
+        } catch (error) {
+            console.error('绑定用户管理事件时出错:', error);
         }
-
-        // 重新加载配置
-        document.getElementById('reload-config').addEventListener('click', () => {
-            this.reloadConfig();
-        });
-
-        // 模型类型变化时的处理
-        document.getElementById('model-type').addEventListener('change', (e) => {
-            this.handleModelTypeChange(e.target.value);
-        });
-
-        // 点击模态框外部关闭
-        document.getElementById('model-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'model-modal') {
-                this.closeModal();
-            }
-        });
-        document.getElementById('delete-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'delete-modal') {
-                this.closeDeleteModal();
-            }
-        });
-
-        // 高级配置抽屉展开/收起
-        document.addEventListener('click', (e) => {
-            if (e.target.id === 'toggle-advanced-prompt' || e.target.closest('#toggle-advanced-prompt')) {
-                this.toggleAdvancedPromptConfig();
-            }
-        });
     }
 
     async apiRequest(endpoint, options = {}) {
         try {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            // 添加认证头
+            if (this.token) {
+                headers['Authorization'] = `Bearer ${this.token}`;
+                console.log(`API请求 ${endpoint} 使用token:`, this.token.substring(0, 20) + '...');
+            } else {
+                console.log(`API请求 ${endpoint} 没有token`);
+            }
+
             const response = await fetch(`${this.baseURL}${endpoint}`, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                },
+                headers,
                 ...options
             });
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    // 认证失败，清除token并跳转到登录页面
+                    localStorage.removeItem('auth_token');
+                    this.token = null;
+                    this.isAuthenticated = false;
+                    this.showLoginPage();
+                    throw new Error('认证失败，请重新登录');
+                }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
             return await response.json();
         } catch (error) {
             console.error('API请求失败:', error);
-            this.showToast(`请求失败: ${error.message}`, 'error');
+            if (error.message !== '认证失败，请重新登录') {
+                this.showToast(`请求失败: ${error.message}`, 'error');
+            }
             throw error;
         }
     }
@@ -187,37 +668,41 @@ class AIPromptProxyAdmin {
     }
 
     filterModels() {
-        const searchTerm = document.getElementById('search-input').value.toLowerCase();
-        const typeFilter = document.getElementById('type-filter').value;
-        const sortFilter = document.getElementById('sort-filter')?.value || 'updated_at';
+        const searchInput = document.getElementById('search-input');
+        const typeFilter = document.getElementById('type-filter');
+        const sortFilter = document.getElementById('sort-filter');
 
+        const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+        const selectedType = typeFilter ? typeFilter.value : '';
+        const sortBy = sortFilter ? sortFilter.value : 'updated_at';
+
+        // 筛选模型
         let filteredModels = this.models.filter(model => {
+            // 搜索匹配
             const matchesSearch = !searchTerm || 
                 model.id.toLowerCase().includes(searchTerm) ||
                 model.name.toLowerCase().includes(searchTerm) ||
                 (model.prompt && model.prompt.toLowerCase().includes(searchTerm));
-            
-            const matchesType = !typeFilter || model.type === typeFilter;
-            
+
+            // 类型匹配
+            const matchesType = !selectedType || model.type === selectedType;
+
             return matchesSearch && matchesType;
         });
 
         // 排序
         filteredModels.sort((a, b) => {
-            switch (sortFilter) {
+            switch (sortBy) {
                 case 'updated_at':
-                    // 按更新时间排序（最新的在前）
-                    const dateA = new Date(a.updated_at || 0);
-                    const dateB = new Date(b.updated_at || 0);
-                    return dateB - dateA;
+                    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
                 case 'type':
                     return a.type.localeCompare(b.type);
                 case 'recent':
-                    // 假设按ID排序作为最近添加的指标
                     return b.id.localeCompare(a.id);
                 case 'name':
-                default:
                     return a.name.localeCompare(b.name);
+                default:
+                    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
             }
         });
 
@@ -274,8 +759,22 @@ class AIPromptProxyAdmin {
                             <i class="fas fa-link text-gray-500"></i>
                         </div>
                         <div class="flex-1">
-                            <span class="font-semibold text-gray-700">URL:</span>
+                            <span class="font-semibold text-gray-700">服务商接入地址:</span>
                             <p class="text-gray-900 break-all mt-1">${this.escapeHtml(model.url)}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start text-sm text-gray-600">
+                        <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center mr-3 mt-0.5">
+                            <i class="fas fa-globe text-gray-500"></i>
+                        </div>
+                        <div class="flex-1">
+                            <span class="font-semibold text-gray-700">接入地址:</span>
+                            <div class="flex items-center mt-1">
+                                <p class="text-gray-900 break-all flex-1">${this.generateAccessUrl(model.url)}</p>
+                                <button onclick="app.copyToClipboard('${this.generateAccessUrl(model.url)}', '接入地址')" class="tooltip text-gray-400 hover:text-blue-500 transition-colors duration-200 ml-2" data-tooltip="复制接入地址">
+                                    <i class="fas fa-copy text-xs"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     ${model.prompt ? `
@@ -365,6 +864,8 @@ class AIPromptProxyAdmin {
             title.textContent = '编辑模型配置';
             this.fillForm(model);
             document.getElementById('model-id').disabled = true;
+            // 根据模型类型设置placeholder
+            this.handleModelTypeChange(model.type);
         } else {
             this.currentEditingModel = null;
             title.textContent = '添加模型配置';
@@ -373,6 +874,8 @@ class AIPromptProxyAdmin {
             
             // 只设置模型类型的默认值，其他字段保持空白
             document.getElementById('model-type').value = 'chat';
+            // 根据默认模型类型设置placeholder
+            this.handleModelTypeChange('chat');
         }
 
         modal.classList.remove('hidden');
@@ -387,8 +890,18 @@ class AIPromptProxyAdmin {
     }
 
     handleModelTypeChange(modelType) {
-        // 移除自动填充默认值的逻辑，保持用户的选择
-        // 用户可以根据需要手动填写或保持空白
+        // 根据模型类型更新服务商接入地址的placeholder
+        const urlInput = document.getElementById('model-url');
+        if (urlInput) {
+            const placeholders = {
+                'chat': 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                'image': 'https://ark.cn-beijing.volces.com/api/v3/images/generations',
+                'audio': 'https://api.example.com/v1/audio/transcriptions',
+                'video': 'https://api.example.com/v1/video/generations'
+            };
+            
+            urlInput.placeholder = placeholders[modelType] || 'https://api.example.com';
+        }
     }
 
     fillForm(model) {
@@ -559,28 +1072,7 @@ class AIPromptProxyAdmin {
         }
     }
 
-    async reloadConfig() {
-        const button = document.getElementById('reload-config');
-        const originalText = button.innerHTML;
-        
-        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>重新加载中...';
-        button.disabled = true;
 
-        try {
-            await this.apiRequest('/config/reload', {
-                method: 'POST'
-            });
-            this.showToast('✅ 配置重新加载成功', 'success');
-            this.loadModels();
-            this.loadStatus();
-        } catch (error) {
-            console.error('重新加载配置失败:', error);
-            this.showToast('❌ 重新加载失败: ' + error.message, 'error');
-        } finally {
-            button.innerHTML = originalText;
-            button.disabled = false;
-        }
-    }
 
     updateTotalCount() {
         document.getElementById('total-models').textContent = this.models.length;
@@ -660,6 +1152,24 @@ class AIPromptProxyAdmin {
         return div.innerHTML;
     }
 
+    generateAccessUrl(serviceProviderUrl) {
+        try {
+            // 获取当前浏览器的域名、IP和端口
+            const currentLocation = window.location;
+            const currentOrigin = currentLocation.origin; // 包含协议、域名和端口
+            
+            // 解析服务商接入地址，提取路径
+            const url = new URL(serviceProviderUrl);
+            const path = url.pathname;
+            
+            // 生成接入地址：当前域名 + 模型请求路径
+            return `${currentOrigin}${path}`;
+        } catch (error) {
+            console.error('生成接入地址失败:', error);
+            return '无效的服务商地址';
+        }
+    }
+
     async copyToClipboard(text, label = '内容') {
         try {
             await navigator.clipboard.writeText(text);
@@ -715,6 +1225,686 @@ class AIPromptProxyAdmin {
             icon.classList.remove('rotate-180');
         }
     }
+
+    // RSA加密相关方法
+    async getPublicKey() {
+        try {
+            const response = await fetch(`${this.baseURL}/auth/public-key`);
+            const data = await response.json();
+            
+            if (data.code === 0) {
+                this.publicKey = data.data.public_key;
+                console.log('获取公钥成功');
+                return this.publicKey;
+            } else {
+                throw new Error(data.message || '获取公钥失败');
+            }
+        } catch (error) {
+            console.error('获取公钥失败:', error);
+            throw error;
+        }
+    }
+
+    async importPublicKey(pemKey) {
+        try {
+            // 移除PEM头尾和换行符
+            const pemHeader = "-----BEGIN PUBLIC KEY-----";
+            const pemFooter = "-----END PUBLIC KEY-----";
+            const pemContents = pemKey.replace(pemHeader, '').replace(pemFooter, '').replace(/\s/g, '');
+            
+            // Base64解码
+            const binaryDerString = atob(pemContents);
+            const binaryDer = new Uint8Array(binaryDerString.length);
+            for (let i = 0; i < binaryDerString.length; i++) {
+                binaryDer[i] = binaryDerString.charCodeAt(i);
+            }
+            
+            // 导入公钥
+            const publicKey = await window.crypto.subtle.importKey(
+                'spki',
+                binaryDer.buffer,
+                {
+                    name: 'RSA-OAEP',
+                    hash: 'SHA-256'
+                },
+                false,
+                ['encrypt']
+            );
+            
+            return publicKey;
+        } catch (error) {
+            console.error('导入公钥失败:', error);
+            throw error;
+        }
+    }
+
+    async encryptPassword(password) {
+        try {
+            // 如果没有公钥，先获取
+            if (!this.publicKey) {
+                await this.getPublicKey();
+            }
+            
+            // 导入公钥
+            const publicKey = await this.importPublicKey(this.publicKey);
+            
+            // 加密密码
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const encrypted = await window.crypto.subtle.encrypt(
+                {
+                    name: 'RSA-OAEP'
+                },
+                publicKey,
+                data
+            );
+            
+            // 转换为Base64
+            const encryptedArray = new Uint8Array(encrypted);
+            const encryptedBase64 = btoa(String.fromCharCode.apply(null, encryptedArray));
+            
+            return encryptedBase64;
+        } catch (error) {
+            console.error('密码加密失败:', error);
+            throw error;
+        }
+    }
+
+    // 认证相关方法
+    async handleLogin() {
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        if (!username || !password) {
+            this.showToast('请输入用户名和密码', 'error');
+            return;
+        }
+
+        try {
+            // 加密密码
+            console.log('正在加密密码...');
+            const encryptedPassword = await this.encryptPassword(password);
+            console.log('密码加密完成');
+            
+            const response = await fetch(`${this.baseURL}/auth/encrypted-login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    username, 
+                    encrypted_password: encryptedPassword 
+                })
+            });
+
+            const data = await response.json();
+            console.log('登录响应:', data);
+
+            if (data.code === 0) {
+                this.token = data.data.token;
+                localStorage.setItem('auth_token', this.token);
+                this.isAuthenticated = true;
+                console.log('Token设置成功:', this.token);
+                this.showToast(data.message || '登录成功', 'success');
+                
+                // 延迟一下再切换页面，确保Toast显示和token设置完成
+                setTimeout(async () => {
+                    console.log('切换到主应用页面，当前token:', this.token);
+                    this.showMainApp();
+                    
+                    // 获取用户信息后再初始化主应用
+                    try {
+                        const profileResponse = await this.apiRequest('/auth/profile');
+                        if (profileResponse.code === 0) {
+                            this.currentUser = profileResponse.data; // 设置当前用户信息
+                            console.log('用户信息获取成功:', this.currentUser);
+                        }
+                    } catch (error) {
+                        console.error('获取用户信息失败:', error);
+                    }
+                    
+                    // 再延迟一下确保页面切换完成后再初始化
+                    setTimeout(() => {
+                        console.log('初始化主应用');
+                        this.initMainApp();
+                    }, 100);
+                }, 500);
+            } else {
+                this.showToast(data.message || '登录失败', 'error');
+            }
+        } catch (error) {
+            console.error('登录失败:', error);
+            this.showToast('登录失败: ' + error.message, 'error');
+        }
+    }
+
+    async handleInstall() {
+        const username = document.getElementById('install-username').value;
+        const password = document.getElementById('install-password').value;
+        const confirmPassword = document.getElementById('install-confirm-password').value;
+
+        if (!username || !password || !confirmPassword) {
+            this.showToast('请填写所有字段', 'error');
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            this.showToast('两次输入的密码不一致', 'error');
+            return;
+        }
+
+        if (password.length < 6) {
+            this.showToast('密码长度至少6位', 'error');
+            return;
+        }
+
+        try {
+            // 加密密码
+            console.log('正在加密密码...');
+            const encryptedPassword = await this.encryptPassword(password);
+            console.log('密码加密完成');
+            
+            const response = await fetch(`${this.baseURL}/auth/encrypted-register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    username, 
+                    encrypted_password: encryptedPassword 
+                })
+            });
+
+            const data = await response.json();
+            console.log('安装响应:', data);
+
+            if (data.code === 0) {
+                this.token = data.data.token;
+                localStorage.setItem('auth_token', this.token);
+                this.isAuthenticated = true;
+                console.log('Token设置成功:', this.token);
+                this.showToast(data.message || '安装完成，欢迎使用！', 'success');
+                
+                // 延迟一下再切换页面，确保Toast显示和token设置完成
+                setTimeout(async () => {
+                    console.log('切换到主应用页面，当前token:', this.token);
+                    this.showMainApp();
+                    
+                    // 获取用户信息后再初始化主应用
+                    try {
+                        const profileResponse = await this.apiRequest('/auth/profile');
+                        if (profileResponse.code === 0) {
+                            this.currentUser = profileResponse.data; // 设置当前用户信息
+                            console.log('用户信息获取成功:', this.currentUser);
+                        }
+                    } catch (error) {
+                        console.error('获取用户信息失败:', error);
+                    }
+                    
+                    // 再延迟一下确保页面切换完成后再初始化
+                    setTimeout(() => {
+                        console.log('初始化主应用');
+                        this.initMainApp();
+                    }, 100);
+                }, 500);
+            } else {
+                this.showToast(data.message || '安装失败', 'error');
+            }
+        } catch (error) {
+            console.error('安装失败:', error);
+            this.showToast('安装失败: ' + error.message, 'error');
+        }
+    }
+
+    async handleLogout() {
+        try {
+            await this.apiRequest('/auth/logout', {
+                method: 'POST'
+            });
+        } catch (error) {
+            console.error('注销请求失败:', error);
+        } finally {
+            // 无论请求是否成功，都清除本地状态
+            localStorage.removeItem('auth_token');
+            this.token = null;
+            this.isAuthenticated = false;
+            this.showToast('已注销登录', 'info');
+            this.showLoginPage();
+        }
+    }
+
+    // 用户管理相关方法
+    showUserManagement() {
+        // 检查权限：只有管理员才能访问用户管理
+        if (!this.currentUser || !this.currentUser.is_admin) {
+            this.showToast('❌ 权限不足，只有管理员才能访问用户管理', 'error');
+            return;
+        }
+        
+        // 设置当前视图
+        this.currentView = 'users';
+        
+        // 隐藏模型管理页面
+        const modelManagementSection = document.getElementById('model-management-section');
+        if (modelManagementSection) {
+            modelManagementSection.classList.add('hidden');
+        }
+        
+        // 显示用户管理界面
+        const userManagementSection = document.getElementById('user-management-section');
+        if (userManagementSection) {
+            userManagementSection.classList.remove('hidden');
+        }
+        
+        // 更新导航按钮状态
+        const modelNavBtn = document.getElementById('model-management-nav');
+        const userNavBtn = document.getElementById('user-management-nav');
+        
+        if (modelNavBtn) {
+            modelNavBtn.classList.remove('bg-blue-600', 'text-white');
+            modelNavBtn.classList.add('bg-white/20', 'text-white/80');
+        }
+        
+        if (userNavBtn) {
+            userNavBtn.classList.remove('bg-white/20', 'text-white/80');
+            userNavBtn.classList.add('bg-blue-600', 'text-white');
+        }
+        
+        // 加载用户数据
+        this.loadUsers();
+    }
+
+    showModelManagement() {
+        // 设置当前视图
+        this.currentView = 'models';
+        
+        // 隐藏用户管理界面
+        const userManagementSection = document.getElementById('user-management-section');
+        if (userManagementSection) {
+            userManagementSection.classList.add('hidden');
+        }
+        
+        // 显示模型管理页面
+        const modelManagementSection = document.getElementById('model-management-section');
+        if (modelManagementSection) {
+            modelManagementSection.classList.remove('hidden');
+        }
+        
+        // 更新导航按钮状态
+        const modelNavBtn = document.getElementById('model-management-nav');
+        const userNavBtn = document.getElementById('user-management-nav');
+        
+        if (modelNavBtn) {
+            modelNavBtn.classList.remove('bg-white/20', 'text-white/80');
+            modelNavBtn.classList.add('bg-blue-600', 'text-white');
+        }
+        
+        if (userNavBtn) {
+            userNavBtn.classList.remove('bg-blue-600', 'text-white');
+            userNavBtn.classList.add('bg-white/20', 'text-white/80');
+        }
+        
+        // 重新渲染模型列表
+        this.filterModels();
+    }
+
+    async loadUsers() {
+        try {
+            const response = await this.apiRequest('/users');
+            this.users = response.data.users || [];
+            this.filteredUsers = [...this.users];
+            this.updateUserCounts();
+            this.renderUsers();
+        } catch (error) {
+            console.error('加载用户失败:', error);
+            this.showToast('❌ 加载用户失败: ' + error.message, 'error');
+        }
+    }
+
+    filterUsers() {
+        // 移除搜索和筛选功能，直接显示所有用户
+        this.filteredUsers = this.users;
+        this.renderUsers();
+    }
+
+    renderUsers() {
+        const container = document.getElementById('users-table-body');
+        const emptyState = document.getElementById('users-empty-state');
+        const userTable = container.closest('.bg-white\\/80'); // 用户表格容器
+
+        if (this.filteredUsers.length === 0) {
+            container.innerHTML = '';
+            if (userTable) userTable.style.display = 'none'; // 隐藏用户表格
+            emptyState.classList.remove('hidden');
+            return;
+        }
+
+        emptyState.classList.add('hidden');
+        if (userTable) userTable.style.display = 'block'; // 显示用户表格
+        container.innerHTML = this.filteredUsers.map(user => `
+            <tr class="hover:bg-gray-50 transition-colors duration-200">
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                        <div class="w-10 h-10 bg-gradient-to-br ${user.is_admin ? 'from-purple-400 to-purple-600' : 'from-blue-400 to-blue-600'} rounded-full flex items-center justify-center">
+                            <i class="fas ${user.is_admin ? 'fa-crown' : 'fa-user'} text-white"></i>
+                        </div>
+                        <div class="ml-4">
+                            <div class="text-sm font-medium text-gray-900">${this.escapeHtml(user.username)}</div>
+                            <div class="text-sm text-gray-500">ID: ${user.id}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_admin ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">
+                        ${user.is_admin ? '👑 管理员' : '👤 普通用户'}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                        ${user.is_enabled ? '✅ 启用' : '❌ 禁用'}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${user.last_login ? this.formatDateTime(user.last_login) : '从未登录'}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${this.formatDateTime(user.created_at)}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <div class="flex items-center justify-end space-x-2">
+                        <button onclick="app.editUser(${user.id})" class="text-blue-600 hover:text-blue-900 transition-colors duration-200" title="编辑用户">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="app.toggleUserStatus(${user.id}, ${!user.is_enabled})" class="text-${user.is_enabled ? 'orange' : 'green'}-600 hover:text-${user.is_enabled ? 'orange' : 'green'}-900 transition-colors duration-200" title="${user.is_enabled ? '禁用用户' : '启用用户'}">
+                            <i class="fas fa-${user.is_enabled ? 'ban' : 'check'}"></i>
+                        </button>
+                        <button onclick="app.changeUserPassword(${user.id}, '${this.escapeHtml(user.username)}')" class="text-purple-600 hover:text-purple-900 transition-colors duration-200" title="修改密码">
+                            <i class="fas fa-key"></i>
+                        </button>
+                        <button onclick="app.deleteUser(${user.id}, '${this.escapeHtml(user.username)}')" class="text-red-600 hover:text-red-900 transition-colors duration-200" title="删除用户">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    updateUserCounts() {
+        const totalUsers = this.users.length;
+        const activeUsers = this.users.filter(u => u.is_enabled).length;
+
+        const totalUsersEl = document.getElementById('total-users-count');
+        const activeUsersEl = document.getElementById('active-users-count');
+        
+        if (totalUsersEl) totalUsersEl.textContent = totalUsers;
+        if (activeUsersEl) activeUsersEl.textContent = activeUsers;
+    }
+
+    openUserModal(user = null) {
+        const modal = document.getElementById('user-modal');
+        const title = document.getElementById('user-modal-title');
+        const form = document.getElementById('user-form');
+        const passwordSection = document.getElementById('password-section');
+
+        if (user) {
+            this.currentEditingUser = user;
+            title.textContent = '编辑用户';
+            this.fillUserForm(user);
+            passwordSection.style.display = 'none'; // 编辑时隐藏密码部分
+        } else {
+            this.currentEditingUser = null;
+            title.textContent = '添加用户';
+            form.reset();
+            passwordSection.style.display = 'block'; // 新增时显示密码部分
+            this.generatePassword(); // 自动生成密码
+        }
+
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeUserModal() {
+        const modal = document.getElementById('user-modal');
+        modal.classList.add('hidden');
+        document.body.style.overflow = 'auto';
+        this.currentEditingUser = null;
+        
+        // 清空生成的密码
+        document.getElementById('generated-password').value = '';
+        document.getElementById('copy-password').disabled = true;
+    }
+
+    fillUserForm(user) {
+        document.getElementById('user-username').value = user.username;
+        document.getElementById('user-is-admin').value = user.is_admin.toString();
+    }
+
+    generatePassword() {
+        const length = 12;
+        const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+        let password = '';
+        
+        for (let i = 0; i < length; i++) {
+            password += charset.charAt(Math.floor(Math.random() * charset.length));
+        }
+        
+        document.getElementById('generated-password').value = password;
+        document.getElementById('copy-password').disabled = false;
+        
+        return password;
+    }
+
+    copyPassword() {
+        const passwordInput = document.getElementById('generated-password');
+        passwordInput.select();
+        document.execCommand('copy');
+        this.showToast('密码已复制到剪贴板', 'success');
+    }
+
+    async saveUser() {
+        const form = document.getElementById('user-form');
+        const formData = new FormData(form);
+        const data = {
+            username: formData.get('username').trim(),
+            is_admin: formData.get('is_admin') === 'true'
+        };
+
+        // 创建用户时设置默认状态为启用
+        if (!this.currentEditingUser) {
+            data.is_enabled = true;
+        }
+
+        // 表单验证
+        if (!data.username) {
+            this.showToast('请输入用户名', 'error');
+            return;
+        }
+
+        // 显示加载状态
+        const saveBtn = document.querySelector('#user-form button[type="submit"]');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>保存中...';
+        saveBtn.disabled = true;
+
+        try {
+            if (this.currentEditingUser) {
+                // 更新用户
+                await this.apiRequest(`/users/${this.currentEditingUser.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                this.showToast('✅ 用户更新成功', 'success');
+            } else {
+                // 创建用户
+                await this.apiRequest('/users', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                this.showToast('✅ 用户创建成功', 'success');
+            }
+
+            this.closeUserModal();
+            this.loadUsers();
+        } catch (error) {
+            this.showToast('❌ 操作失败: ' + error.message, 'error');
+            console.error('保存用户失败:', error);
+        } finally {
+            // 恢复按钮状态
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }
+    }
+
+    async editUser(userId) {
+        const user = this.users.find(u => u.id === userId);
+        if (user) {
+            this.openUserModal(user);
+        }
+    }
+
+    deleteUser(userId, username) {
+        this.currentDeletingUser = userId;
+        document.getElementById('delete-user-name').textContent = username;
+        document.getElementById('delete-user-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeDeleteUserModal() {
+        document.getElementById('delete-user-modal').classList.add('hidden');
+        document.body.style.overflow = 'auto';
+        this.currentDeletingUser = null;
+    }
+
+    async confirmDeleteUser() {
+        if (!this.currentDeletingUser) return;
+
+        try {
+            await this.apiRequest(`/users/${this.currentDeletingUser}`, {
+                method: 'DELETE'
+            });
+            this.showToast('✅ 用户删除成功', 'success');
+            this.closeDeleteUserModal();
+            this.loadUsers();
+        } catch (error) {
+            console.error('删除用户失败:', error);
+            this.showToast('❌ 删除失败: ' + error.message, 'error');
+        }
+    }
+
+    async toggleUserStatus(userId, newStatus) {
+        try {
+            await this.apiRequest(`/users/${userId}/status`, {
+                method: 'PUT',
+                body: JSON.stringify({ is_enabled: newStatus })
+            });
+            this.showToast(`✅ 用户状态${newStatus ? '启用' : '禁用'}成功`, 'success');
+            this.loadUsers();
+        } catch (error) {
+            console.error('更新用户状态失败:', error);
+            this.showToast('❌ 状态更新失败: ' + error.message, 'error');
+        }
+    }
+
+    changeUserPassword(userId, username) {
+        this.currentPasswordUserId = userId;
+        document.getElementById('change-password-subtitle').textContent = `修改用户 ${username} 的密码`;
+        
+        // 管理员修改其他用户密码时隐藏当前密码输入
+        const currentPasswordSection = document.getElementById('current-password-section');
+        const currentPasswordInput = document.getElementById('current-password');
+        currentPasswordSection.style.display = 'none';
+        currentPasswordInput.removeAttribute('required'); // 移除required属性避免表单验证错误
+        
+        document.getElementById('change-password-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    changeMyPassword() {
+        this.currentPasswordUserId = null; // null表示修改自己的密码
+        document.getElementById('change-password-subtitle').textContent = '修改我的密码';
+        
+        // 修改自己密码时显示当前密码输入
+        const currentPasswordSection = document.getElementById('current-password-section');
+        const currentPasswordInput = document.getElementById('current-password');
+        currentPasswordSection.style.display = 'block';
+        currentPasswordInput.setAttribute('required', 'required'); // 添加required属性
+        
+        document.getElementById('change-password-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeChangePasswordModal() {
+        document.getElementById('change-password-modal').classList.add('hidden');
+        document.body.style.overflow = 'auto';
+        this.currentPasswordUserId = null;
+        
+        // 清空表单
+        document.getElementById('change-password-form').reset();
+    }
+
+    async savePassword() {
+        const form = document.getElementById('change-password-form');
+        const formData = new FormData(form);
+        const currentPassword = formData.get('current_password');
+        const newPassword = formData.get('new_password');
+        const confirmPassword = formData.get('confirm_password');
+
+        // 表单验证
+        if (!newPassword || !confirmPassword) {
+            this.showToast('请填写新密码和确认密码', 'error');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            this.showToast('两次输入的密码不一致', 'error');
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            this.showToast('密码长度至少6位', 'error');
+            return;
+        }
+
+        // 显示加载状态
+        const saveBtn = document.querySelector('#change-password-form button[type="submit"]');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>修改中...';
+        saveBtn.disabled = true;
+
+        try {
+            if (this.currentPasswordUserId) {
+                // 管理员修改其他用户密码
+                await this.apiRequest(`/users/${this.currentPasswordUserId}/password`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ new_password: newPassword })
+                });
+            } else {
+                // 用户修改自己的密码
+                if (!currentPassword) {
+                    this.showToast('请输入当前密码', 'error');
+                    return;
+                }
+                await this.apiRequest('/user/password', {
+                    method: 'PUT',
+                    body: JSON.stringify({ 
+                        old_password: currentPassword,
+                        new_password: newPassword 
+                    })
+                });
+            }
+
+            this.showToast('✅ 密码修改成功', 'success');
+            this.closeChangePasswordModal();
+        } catch (error) {
+            this.showToast('❌ 密码修改失败: ' + error.message, 'error');
+            console.error('修改密码失败:', error);
+        } finally {
+            // 恢复按钮状态
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }
+    }
 }
 
 // 初始化应用
@@ -740,15 +1930,7 @@ document.addEventListener('keydown', (e) => {
         app.reloadConfig();
     }
     
-    // Ctrl/Cmd + F 聚焦搜索框
-    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        const searchInput = document.getElementById('search-input');
-        if (searchInput) {
-            searchInput.focus();
-            searchInput.select();
-        }
-    }
+
     
     // ESC 关闭模态框
     if (e.key === 'Escape') {

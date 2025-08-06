@@ -84,6 +84,11 @@ func (s *ConfigService) GetConfig() *config.Config {
 	return s.config
 }
 
+// GetDBManager 获取数据库管理器
+func (s *ConfigService) GetDBManager() *db.Manager {
+	return s.db
+}
+
 // GetModel 获取模型配置
 func (s *ConfigService) GetModel(modelID string) (*config.ModelConfig, bool) {
 	return s.config.GetModel(modelID)

@@ -9,7 +9,7 @@ import (
 func TestLoadConfig(t *testing.T) {
 	// 创建临时配置目录
 	tempDir := t.TempDir()
-	
+
 	// 创建测试配置文件
 	configContent := `models:
   - id: "test-model"
@@ -21,33 +21,33 @@ func TestLoadConfig(t *testing.T) {
     prompt_path: "messages.0.content"
     prompt_value: "测试值"
     prompt_type: "string"`
-	
+
 	configFile := filepath.Join(tempDir, "test.yaml")
 	err := os.WriteFile(configFile, []byte(configContent), 0644)
 	if err != nil {
 		t.Fatalf("创建测试配置文件失败: %v", err)
 	}
-	
+
 	// 加载配置
 	config, err := LoadConfig(tempDir)
 	if err != nil {
 		t.Fatalf("加载配置失败: %v", err)
 	}
-	
+
 	// 验证配置
 	if len(config.Models) != 1 {
 		t.Errorf("期望1个模型，实际得到%d个", len(config.Models))
 	}
-	
+
 	model, exists := config.GetModel("test-model")
 	if !exists {
 		t.Error("未找到测试模型")
 	}
-	
+
 	if model.Name != "测试模型" {
 		t.Errorf("模型名称不匹配，期望'测试模型'，实际'%s'", model.Name)
 	}
-	
+
 	if model.Type != ModelTypeChat {
 		t.Errorf("模型类型不匹配，期望'%s'，实际'%s'", ModelTypeChat, model.Type)
 	}
@@ -104,7 +104,7 @@ func TestValidateModelConfig(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.model.Validate()

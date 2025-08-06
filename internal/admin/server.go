@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/config"
@@ -20,6 +21,7 @@ type AdminServer struct {
 	config        *config.Config
 	configDir     string
 	configService *service.ConfigService
+	authService   *service.AuthService
 }
 
 // NewAdminServer 创建新的管理API服务器
@@ -31,12 +33,19 @@ func NewAdminServer(cfg *config.Config, configDir string) *AdminServer {
 }
 
 // NewAdminServerWithService 使用配置服务创建新的管理API服务器
-func NewAdminServerWithService(configService *service.ConfigService, configDir string) *AdminServer {
+func NewAdminServerWithService(configService *service.ConfigService, configDir string) (*AdminServer, error) {
+	// 创建认证服务
+	authService, err := service.NewAuthService(configService.GetDBManager())
+	if err != nil {
+		return nil, fmt.Errorf("创建认证服务失败: %w", err)
+	}
+
 	return &AdminServer{
 		config:        configService.GetConfig(),
 		configDir:     configDir,
 		configService: configService,
-	}
+		authService:   authService,
+	}, nil
 }
 
 // Start 启动管理API服务器
@@ -72,21 +81,59 @@ func (s *AdminServer) Start(port string) error {
 	// API路由组
 	api := r.Group("/api/v1")
 	{
-		// 模型相关API
-		models := api.Group("/models")
+		// 认证相关API（无需认证）
+		auth := api.Group("/auth")
 		{
-			models.GET("", s.getModels)          // 获取模型列表
-			models.GET("/:id", s.getModel)       // 根据模型ID获取模型信息
-			models.PUT("/:id", s.updateModel)    // 根据模型ID配置模型信息
-			models.POST("", s.createModel)       // 创建模型配置
-			models.DELETE("/:id", s.deleteModel) // 删除模型配置
+			auth.GET("/check-install", s.checkInstall)            // 检查是否首次安装
+			auth.GET("/public-key", s.getPublicKey)               // 获取公钥
+			auth.POST("/register", s.register)                    // 用户注册（仅首次安装）
+			auth.POST("/encrypted-register", s.encryptedRegister) // 加密用户注册
+			auth.POST("/login", s.login)                          // 用户登录
+			auth.POST("/encrypted-login", s.encryptedLogin)       // 加密用户登录
 		}
 
-		// 配置相关API
-		config := api.Group("/config")
+		// 需要认证的API
+		protected := api.Group("")
+		protected.Use(s.authMiddleware())
 		{
-			config.POST("/reload", s.reloadConfig) // 重新加载配置
-			config.GET("/status", s.getStatus)     // 获取服务状态
+			// 认证相关API
+			protected.POST("/auth/logout", s.logout)     // 用户注销
+			protected.GET("/auth/profile", s.getProfile) // 获取用户信息
+
+			// 模型相关API
+			models := protected.Group("/models")
+			{
+				models.GET("", s.getModels)          // 获取模型列表
+				models.GET("/:id", s.getModel)       // 根据模型ID获取模型信息
+				models.PUT("/:id", s.updateModel)    // 根据模型ID配置模型信息
+				models.POST("", s.createModel)       // 创建模型配置
+				models.DELETE("/:id", s.deleteModel) // 删除模型配置
+			}
+
+			// 配置相关API
+			config := protected.Group("/config")
+			{
+				config.POST("/reload", s.reloadConfig) // 重新加载配置
+				config.GET("/status", s.getStatus)     // 获取服务状态
+			}
+
+			// 用户管理API（需要管理员权限）
+			users := protected.Group("/users")
+			users.Use(s.adminMiddleware()) // 添加管理员权限检查
+			{
+				users.GET("", s.getUsers)                         // 获取用户列表
+				users.POST("", s.createUser)                      // 创建用户
+				users.PUT("/:id", s.updateUser)                   // 更新用户信息
+				users.DELETE("/:id", s.deleteUser)                // 删除用户
+				users.PUT("/:id/status", s.updateUserStatus)      // 更新用户状态
+				users.PUT("/:id/password", s.adminChangePassword) // 管理员修改用户密码
+			}
+
+			// 用户个人相关API（所有用户都可以访问）
+			user := protected.Group("/user")
+			{
+				user.PUT("/password", s.changePassword) // 修改自己的密码
+			}
 		}
 	}
 
@@ -449,7 +496,7 @@ func (s *AdminServer) updateModel(c *gin.Context) {
 	model.Prompt = req.Prompt
 	model.PromptPath = req.PromptPath
 	model.PromptValueType = req.PromptValueType
-	model.PromptValue = req.PromptValue  // 允许设置为nil来清空字段
+	model.PromptValue = req.PromptValue // 允许设置为nil来清空字段
 	if req.Url != "" {
 		model.Url = req.Url
 	}
@@ -661,7 +708,7 @@ func (s *AdminServer) setupEmbeddedStaticFiles(r *gin.Engine) {
 
 	// 使用嵌入的文件系统
 	r.StaticFS("/static", http.FS(webSubFS))
-	
+
 	// 单独处理 app.js
 	r.GET("/app.js", func(c *gin.Context) {
 		data, err := webFS.ReadFile("web/app.js")
@@ -672,7 +719,7 @@ func (s *AdminServer) setupEmbeddedStaticFiles(r *gin.Engine) {
 		c.Header("Content-Type", "application/javascript")
 		c.Data(http.StatusOK, "application/javascript", data)
 	})
-	
+
 	// 单独处理 admin 路径
 	r.GET("/admin", s.serveIndexHTML)
 }
@@ -687,4 +734,506 @@ func (s *AdminServer) serveIndexHTML(c *gin.Context) {
 	}
 	c.Header("Content-Type", "text/html")
 	c.Data(http.StatusOK, "text/html", data)
+}
+
+// authMiddleware 认证中间件
+func (s *AdminServer) authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 获取Authorization头
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "未提供认证token",
+			})
+			c.Abort()
+			return
+		}
+
+		// 检查Bearer前缀
+		if len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "认证token格式错误",
+			})
+			c.Abort()
+			return
+		}
+
+		// 提取token
+		tokenString := authHeader[7:]
+
+		// 验证token
+		claims, err := s.authService.ValidateToken(tokenString)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "认证token无效",
+			})
+			c.Abort()
+			return
+		}
+
+		// 将用户信息存储到上下文
+		c.Set("user_id", claims.UserID)
+		c.Set("username", claims.Username)
+		c.Set("is_admin", claims.IsAdmin)
+
+		c.Next()
+	}
+}
+
+// checkInstall 检查是否首次安装
+func (s *AdminServer) checkInstall(c *gin.Context) {
+	isFirstInstall, err := s.authService.IsFirstInstall()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("检查安装状态失败: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"is_first_install": isFirstInstall,
+		},
+	})
+}
+
+// register 用户注册（仅首次安装）
+func (s *AdminServer) register(c *gin.Context) {
+	var req service.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 注册用户
+	response, err := s.authService.Register(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "注册成功",
+		"data":    response,
+	})
+}
+
+// adminMiddleware 管理员权限中间件
+func (s *AdminServer) adminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		isAdmin, exists := c.Get("is_admin")
+		if !exists || !isAdmin.(bool) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    403,
+				"message": "需要管理员权限",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// getUsers 获取用户列表
+func (s *AdminServer) getUsers(c *gin.Context) {
+	response, err := s.authService.GetAllUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("获取用户列表失败: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data":    response,
+	})
+}
+
+// createUser 创建用户
+func (s *AdminServer) createUser(c *gin.Context) {
+	var req service.CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 获取创建者ID
+	creatorID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	response, err := s.authService.CreateUser(&req, creatorID.(uint))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "用户创建成功",
+		"data":    response,
+	})
+}
+
+// updateUser 更新用户信息
+func (s *AdminServer) updateUser(c *gin.Context) {
+	userID := c.Param("id")
+	id, err := parseUint(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "用户ID格式错误",
+		})
+		return
+	}
+
+	var req service.UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	err = s.authService.UpdateUser(uint(id), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "用户信息更新成功",
+	})
+}
+
+// deleteUser 删除用户
+func (s *AdminServer) deleteUser(c *gin.Context) {
+	userID := c.Param("id")
+	id, err := parseUint(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "用户ID格式错误",
+		})
+		return
+	}
+
+	// 不允许删除自己
+	currentUserID, exists := c.Get("user_id")
+	if exists && currentUserID.(uint) == uint(id) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "不能删除自己",
+		})
+		return
+	}
+
+	err = s.authService.DeleteUser(uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "用户删除成功",
+	})
+}
+
+// updateUserStatus 更新用户状态
+func (s *AdminServer) updateUserStatus(c *gin.Context) {
+	userID := c.Param("id")
+	id, err := parseUint(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "用户ID格式错误",
+		})
+		return
+	}
+
+	var req struct {
+		IsEnabled bool `json:"is_enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 不允许禁用自己
+	currentUserID, exists := c.Get("user_id")
+	if exists && currentUserID.(uint) == uint(id) && !req.IsEnabled {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "不能禁用自己",
+		})
+		return
+	}
+
+	err = s.authService.UpdateUserStatus(uint(id), req.IsEnabled)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "用户状态更新成功",
+	})
+}
+
+// adminChangePassword 管理员修改用户密码
+func (s *AdminServer) adminChangePassword(c *gin.Context) {
+	userID := c.Param("id")
+	id, err := parseUint(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "用户ID格式错误",
+		})
+		return
+	}
+
+	var req service.AdminChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	err = s.authService.AdminChangePassword(uint(id), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "密码修改成功",
+	})
+}
+
+// changePassword 用户修改自己的密码
+func (s *AdminServer) changePassword(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	var req service.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	err := s.authService.ChangePassword(userID.(uint), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "密码修改成功",
+	})
+}
+
+// parseUint 解析字符串为uint
+func parseUint(s string) (uint64, error) {
+	return strconv.ParseUint(s, 10, 32)
+}
+
+// login 用户登录
+func (s *AdminServer) login(c *gin.Context) {
+	var req service.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 用户登录
+	response, err := s.authService.Login(&req)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "登录成功",
+		"data":    response,
+	})
+}
+
+// logout 用户注销
+func (s *AdminServer) logout(c *gin.Context) {
+	// 简单的注销响应，客户端需要删除本地token
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "注销成功",
+	})
+}
+
+// getProfile 获取用户信息
+func (s *AdminServer) getProfile(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	// 从数据库获取用户信息
+	user, err := s.authService.GetUserByID(userID.(uint))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("获取用户信息失败: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data":    user,
+	})
+}
+
+// getPublicKey 获取RSA公钥
+func (s *AdminServer) getPublicKey(c *gin.Context) {
+	response, err := s.authService.GetPublicKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("获取公钥失败: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data":    response,
+	})
+}
+
+// encryptedLogin 加密用户登录
+func (s *AdminServer) encryptedLogin(c *gin.Context) {
+	var req service.EncryptedLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 加密登录
+	response, err := s.authService.EncryptedLogin(&req)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "登录成功",
+		"data":    response,
+	})
+}
+
+// encryptedRegister 加密用户注册（仅首次安装）
+func (s *AdminServer) encryptedRegister(c *gin.Context) {
+	var req service.EncryptedRegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 加密注册
+	response, err := s.authService.EncryptedRegister(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "注册成功",
+		"data":    response,
+	})
 }

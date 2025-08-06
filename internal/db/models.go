@@ -87,3 +87,21 @@ type ConfigMetadata struct {
 func (ConfigMetadata) TableName() string {
 	return "config_metadata"
 }
+
+// User 用户表
+type User struct {
+	ID          uint       `gorm:"primaryKey;autoIncrement" json:"id"`
+	Username    string     `gorm:"column:username;uniqueIndex;not null" json:"username"`
+	Password    string     `gorm:"column:password;not null" json:"-"` // 不在JSON中显示密码
+	IsAdmin     bool       `gorm:"column:is_admin;default:false" json:"is_admin"`
+	IsEnabled   bool       `gorm:"column:is_enabled;default:true" json:"is_enabled"` // 用户是否启用
+	LastLoginAt *time.Time `gorm:"column:last_login_at" json:"last_login_at"`        // 最后登录时间
+	CreatedBy   uint       `gorm:"column:created_by;default:0" json:"created_by"`    // 创建者ID，0表示系统创建
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+// TableName 指定表名
+func (User) TableName() string {
+	return "users"
+}

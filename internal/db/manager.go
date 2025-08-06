@@ -2,15 +2,14 @@ package db
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	
-	// 导入纯Go SQLite驱动
-	_ "modernc.org/sqlite"
 )
 
 // Manager 数据库管理器
@@ -20,30 +19,21 @@ type Manager struct {
 
 // NewManager 创建数据库管理器
 func NewManager(dbPath string) (*Manager, error) {
-	// 确保数据库文件路径存在
+	// 确保数据库目录存在
+	if err := os.MkdirAll(dbPath, 0755); err != nil {
+		return nil, fmt.Errorf("创建数据库目录失败: %w", err)
+	}
+
+	// 设置数据库文件路径
 	dbFile := filepath.Join(dbPath, "config.db")
 
-	var db *gorm.DB
-	var err error
-
-	// 首先尝试使用默认的SQLite驱动（可能是CGO版本）
-	db, err = gorm.Open(sqlite.Open(dbFile), &gorm.Config{
+	// 打开数据库连接
+	db, err := gorm.Open(sqlite.Open(dbFile), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
-	
+
 	if err != nil {
-		// 如果默认驱动失败，尝试使用纯Go版本
-		// 使用modernc.org/sqlite驱动
-		db, err = gorm.Open(sqlite.Dialector{
-			DriverName: "sqlite",
-			DSN:        dbFile,
-		}, &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Info),
-		})
-		
-		if err != nil {
-			return nil, fmt.Errorf("连接数据库失败 (尝试了CGO和纯Go驱动): %w", err)
-		}
+		return nil, fmt.Errorf("连接数据库失败: %w", err)
 	}
 
 	manager := &Manager{db: db}
@@ -58,7 +48,7 @@ func NewManager(dbPath string) (*Manager, error) {
 
 // migrate 执行数据库迁移
 func (m *Manager) migrate() error {
-	return m.db.AutoMigrate(&ModelConfigDB{}, &ConfigMetadata{})
+	return m.db.AutoMigrate(&ModelConfigDB{}, &ConfigMetadata{}, &User{})
 }
 
 // SaveModelConfig 保存模型配置
@@ -197,6 +187,116 @@ func (m *Manager) SetMetadata(key, value string) error {
 	result := m.db.Save(&metadata)
 	if result.Error != nil {
 		return fmt.Errorf("设置元数据失败: %w", result.Error)
+	}
+	return nil
+}
+
+// CreateUser 创建用户
+func (m *Manager) CreateUser(user *User) error {
+	result := m.db.Create(user)
+	if result.Error != nil {
+		return fmt.Errorf("创建用户失败: %w", result.Error)
+	}
+	return nil
+}
+
+// GetUserByUsername 根据用户名获取用户
+func (m *Manager) GetUserByUsername(username string) (*User, error) {
+	var user User
+	result := m.db.Where("username = ?", username).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("用户不存在: %s", username)
+		}
+		return nil, fmt.Errorf("获取用户失败: %w", result.Error)
+	}
+	return &user, nil
+}
+
+// GetUserByID 根据ID获取用户
+func (m *Manager) GetUserByID(id uint) (*User, error) {
+	var user User
+	result := m.db.Where("id = ?", id).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("用户不存在: %d", id)
+		}
+		return nil, fmt.Errorf("获取用户失败: %w", result.Error)
+	}
+	return &user, nil
+}
+
+// UpdateUser 更新用户信息
+func (m *Manager) UpdateUser(user *User) error {
+	result := m.db.Save(user)
+	if result.Error != nil {
+		return fmt.Errorf("更新用户失败: %w", result.Error)
+	}
+	return nil
+}
+
+// GetUserCount 获取用户总数
+func (m *Manager) GetUserCount() (int64, error) {
+	var count int64
+	result := m.db.Model(&User{}).Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("获取用户数量失败: %w", result.Error)
+	}
+	return count, nil
+}
+
+// GetAllUsers 获取所有用户列表
+func (m *Manager) GetAllUsers() ([]User, error) {
+	var users []User
+	result := m.db.Order("created_at DESC").Find(&users)
+	if result.Error != nil {
+		return nil, fmt.Errorf("获取用户列表失败: %w", result.Error)
+	}
+	return users, nil
+}
+
+// DeleteUser 删除用户
+func (m *Manager) DeleteUser(id uint) error {
+	result := m.db.Where("id = ?", id).Delete(&User{})
+	if result.Error != nil {
+		return fmt.Errorf("删除用户失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("用户不存在: %d", id)
+	}
+	return nil
+}
+
+// UpdateUserStatus 更新用户状态
+func (m *Manager) UpdateUserStatus(id uint, isEnabled bool) error {
+	result := m.db.Model(&User{}).Where("id = ?", id).Update("is_enabled", isEnabled)
+	if result.Error != nil {
+		return fmt.Errorf("更新用户状态失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("用户不存在: %d", id)
+	}
+	return nil
+}
+
+// UpdateUserPassword 更新用户密码
+func (m *Manager) UpdateUserPassword(id uint, hashedPassword string) error {
+	result := m.db.Model(&User{}).Where("id = ?", id).Update("password", hashedPassword)
+	if result.Error != nil {
+		return fmt.Errorf("更新用户密码失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("用户不存在: %d", id)
+	}
+	return nil
+}
+
+// UpdateUserLastLogin 更新用户最后登录时间
+func (m *Manager) UpdateUserLastLogin(id uint) error {
+	now := time.Now()
+	result := m.db.Model(&User{}).Where("id = ?", id).Update("last_login_at", &now)
+	if result.Error != nil {
+		return fmt.Errorf("更新用户最后登录时间失败: %w", result.Error)
 	}
 	return nil
 }
