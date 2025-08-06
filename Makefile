@@ -53,7 +53,6 @@ $(PLATFORMS): deps
 	$(eval GOARCH := $(word 2,$(subst /, ,$@)))
 	$(eval OUTPUT_NAME := $(APP_NAME)$(if $(filter windows,$(GOOS)),.exe,))
 	$(eval OUTPUT_DIR := $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH))
-	
 	@echo "🔨 编译 $(GOOS)/$(GOARCH)..."
 	@mkdir -p $(OUTPUT_DIR)
 	

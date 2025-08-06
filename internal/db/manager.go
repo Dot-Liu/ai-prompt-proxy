@@ -8,6 +8,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	
+	// 导入纯Go SQLite驱动
+	_ "modernc.org/sqlite"
 )
 
 // Manager 数据库管理器
@@ -20,12 +23,27 @@ func NewManager(dbPath string) (*Manager, error) {
 	// 确保数据库文件路径存在
 	dbFile := filepath.Join(dbPath, "config.db")
 
-	// 连接SQLite数据库
-	db, err := gorm.Open(sqlite.Open(dbFile), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info), // 静默模式，减少日志输出
+	var db *gorm.DB
+	var err error
+
+	// 首先尝试使用默认的SQLite驱动（可能是CGO版本）
+	db, err = gorm.Open(sqlite.Open(dbFile), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
 	})
+	
 	if err != nil {
-		return nil, fmt.Errorf("连接数据库失败: %w", err)
+		// 如果默认驱动失败，尝试使用纯Go版本
+		// 使用modernc.org/sqlite驱动
+		db, err = gorm.Open(sqlite.Dialector{
+			DriverName: "sqlite",
+			DSN:        dbFile,
+		}, &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Info),
+		})
+		
+		if err != nil {
+			return nil, fmt.Errorf("连接数据库失败 (尝试了CGO和纯Go驱动): %w", err)
+		}
 	}
 
 	manager := &Manager{db: db}
