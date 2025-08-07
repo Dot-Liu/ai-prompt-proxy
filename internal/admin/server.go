@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/config"
 	"github.com/eolinker/ai-prompt-proxy/internal/service"
@@ -22,6 +25,8 @@ type AdminServer struct {
 	configDir     string
 	configService *service.ConfigService
 	authService   *service.AuthService
+	proxyPort     string // 代理服务端口
+	adminPort     string // 管理服务端口
 }
 
 // NewAdminServer 创建新的管理API服务器
@@ -33,7 +38,7 @@ func NewAdminServer(cfg *config.Config, configDir string) *AdminServer {
 }
 
 // NewAdminServerWithService 使用配置服务创建新的管理API服务器
-func NewAdminServerWithService(configService *service.ConfigService, configDir string) (*AdminServer, error) {
+func NewAdminServerWithService(configService *service.ConfigService, configDir string, proxyPort, adminPort string) (*AdminServer, error) {
 	// 创建认证服务
 	authService, err := service.NewAuthService(configService.GetDBManager())
 	if err != nil {
@@ -45,6 +50,8 @@ func NewAdminServerWithService(configService *service.ConfigService, configDir s
 		configDir:     configDir,
 		configService: configService,
 		authService:   authService,
+		proxyPort:     proxyPort,
+		adminPort:     adminPort,
 	}, nil
 }
 
@@ -92,6 +99,12 @@ func (s *AdminServer) Start(port string) error {
 			auth.POST("/encrypted-login", s.encryptedLogin)       // 加密用户登录
 		}
 
+		// 公开配置API（无需认证）
+		publicConfig := api.Group("/config")
+		{
+			publicConfig.GET("/system", s.getSystemConfig) // 获取系统配置
+		}
+
 		// 需要认证的API
 		protected := api.Group("")
 		protected.Use(s.authMiddleware())
@@ -133,6 +146,14 @@ func (s *AdminServer) Start(port string) error {
 			user := protected.Group("/user")
 			{
 				user.PUT("/password", s.changePassword) // 修改自己的密码
+			}
+
+			// API Key管理API（所有用户都可以访问自己的API Key）
+			apiKeys := protected.Group("/api-keys")
+			{
+				apiKeys.GET("", s.getAPIKeys)          // 获取当前用户的API Key列表
+				apiKeys.POST("", s.createAPIKey)       // 创建API Key
+				apiKeys.DELETE("/:id", s.deleteAPIKey) // 删除API Key
 			}
 		}
 	}
@@ -684,6 +705,18 @@ func (s *AdminServer) getStatus(c *gin.Context) {
 	})
 }
 
+// getSystemConfig 获取系统配置
+func (s *AdminServer) getSystemConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"proxy_port": s.proxyPort,
+			"admin_port": s.adminPort,
+		},
+	})
+}
+
 // healthCheck 健康检查
 func (s *AdminServer) healthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -828,6 +861,213 @@ func (s *AdminServer) register(c *gin.Context) {
 		"code":    0,
 		"message": "注册成功",
 		"data":    response,
+	})
+}
+
+// APIKeyResponse API Key响应结构
+type APIKeyResponse struct {
+	ID         uint   `json:"id"`
+	Name       string `json:"name"`
+	KeyValue   string `json:"key_value,omitempty"` // 只在创建时返回完整key
+	KeyPreview string `json:"key_preview"`         // 显示用的预览（前几位+***）
+	IsEnabled  bool   `json:"is_enabled"`
+	LastUsedAt string `json:"last_used_at"`
+	ExpiresAt  string `json:"expires_at"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+// CreateAPIKeyRequest 创建API Key请求结构
+type CreateAPIKeyRequest struct {
+	Name      string `json:"name" binding:"required"`
+	KeyValue  string `json:"key_value"` // 可选，如果不提供则自动生成
+	ExpiresAt string `json:"expires_at"` // 可选的过期时间
+}
+
+// getAPIKeys 获取当前用户的API Key列表
+func (s *AdminServer) getAPIKeys(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	if s.authService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "认证服务不可用",
+		})
+		return
+	}
+
+	apiKeys, err := s.authService.GetAPIKeysByUserID(userID.(uint))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("获取API Key列表失败: %v", err),
+		})
+		return
+	}
+
+	var response []APIKeyResponse
+	for _, apiKey := range apiKeys {
+		// 生成key预览（显示前8位+***）
+		keyPreview := ""
+		if len(apiKey.KeyValue) > 8 {
+			keyPreview = apiKey.KeyValue[:8] + "***"
+		} else {
+			keyPreview = apiKey.KeyValue + "***"
+		}
+
+		lastUsedAt := ""
+		if apiKey.LastUsedAt != nil {
+			lastUsedAt = apiKey.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
+		}
+
+		expiresAt := ""
+		if apiKey.ExpiresAt != nil {
+			expiresAt = apiKey.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+		}
+
+		response = append(response, APIKeyResponse{
+			ID:         apiKey.ID,
+			Name:       apiKey.Name,
+			KeyPreview: keyPreview,
+			IsEnabled:  apiKey.IsEnabled,
+			LastUsedAt: lastUsedAt,
+			ExpiresAt:  expiresAt,
+			CreatedAt:  apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:  apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"api_keys": response,
+			"total":    len(response),
+		},
+	})
+}
+
+// createAPIKey 创建API Key
+func (s *AdminServer) createAPIKey(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	if s.authService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "认证服务不可用",
+		})
+		return
+	}
+
+	var req CreateAPIKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	// 如果没有提供KeyValue，则自动生成
+	keyValue := req.KeyValue
+	if keyValue == "" {
+		keyValue = s.generateAPIKey()
+	}
+
+	// 创建API Key
+	apiKey, err := s.authService.CreateAPIKey(userID.(uint), req.Name, keyValue, req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": fmt.Sprintf("创建API Key失败: %v", err),
+		})
+		return
+	}
+
+	// 返回创建的API Key（包含完整key值）
+	lastUsedAt := ""
+	if apiKey.LastUsedAt != nil {
+		lastUsedAt = apiKey.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	expiresAtStr := ""
+	if apiKey.ExpiresAt != nil {
+		expiresAtStr = apiKey.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	response := APIKeyResponse{
+		ID:        apiKey.ID,
+		Name:      apiKey.Name,
+		KeyValue:  apiKey.KeyValue, // 创建时返回完整key
+		IsEnabled: apiKey.IsEnabled,
+		LastUsedAt: lastUsedAt,
+		ExpiresAt: expiresAtStr,
+		CreatedAt: apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt: apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "API Key创建成功",
+		"data":    response,
+	})
+}
+
+// deleteAPIKey 删除API Key
+func (s *AdminServer) deleteAPIKey(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "用户信息不存在",
+		})
+		return
+	}
+
+	if s.authService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "认证服务不可用",
+		})
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := parseUint(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "无效的API Key ID",
+		})
+		return
+	}
+
+	err = s.authService.DeleteAPIKey(uint(id), userID.(uint))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "API Key删除成功",
 	})
 }
 
@@ -1097,6 +1337,19 @@ func (s *AdminServer) changePassword(c *gin.Context) {
 // parseUint 解析字符串为uint
 func parseUint(s string) (uint64, error) {
 	return strconv.ParseUint(s, 10, 32)
+}
+
+// generateAPIKey 生成API Key
+func (s *AdminServer) generateAPIKey() string {
+	// 生成32字节的随机数据
+	bytes := make([]byte, 32)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		// 如果随机数生成失败，使用时间戳作为后备方案
+		return fmt.Sprintf("ak_%d", time.Now().UnixNano())
+	}
+	// 转换为十六进制字符串并添加前缀
+	return "ak_" + hex.EncodeToString(bytes)
 }
 
 // login 用户登录

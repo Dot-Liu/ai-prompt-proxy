@@ -105,3 +105,24 @@ type User struct {
 func (User) TableName() string {
 	return "users"
 }
+
+// APIKey API密钥表
+type APIKey struct {
+	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID      uint      `gorm:"column:user_id;not null;index" json:"user_id"`           // 所属用户ID
+	Name        string    `gorm:"column:name;not null" json:"name"`                       // API Key名称/描述
+	KeyValue    string    `gorm:"column:key_value;uniqueIndex;not null" json:"key_value"` // API Key值
+	IsEnabled   bool      `gorm:"column:is_enabled;default:true" json:"is_enabled"`       // 是否启用
+	LastUsedAt  *time.Time `gorm:"column:last_used_at" json:"last_used_at"`               // 最后使用时间
+	ExpiresAt   *time.Time `gorm:"column:expires_at" json:"expires_at"`                   // 过期时间，null表示永不过期
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	
+	// 关联用户
+	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+// TableName 指定表名
+func (APIKey) TableName() string {
+	return "api_keys"
+}

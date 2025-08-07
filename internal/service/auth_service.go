@@ -543,3 +543,54 @@ func (s *AuthService) AdminChangePassword(userID uint, req *AdminChangePasswordR
 func (s *AuthService) UpdateUserStatus(userID uint, isEnabled bool) error {
 	return s.dbManager.UpdateUserStatus(userID, isEnabled)
 }
+
+// API Key 管理相关方法
+
+// GetAPIKeysByUserID 获取用户的API Key列表
+func (s *AuthService) GetAPIKeysByUserID(userID uint) ([]db.APIKey, error) {
+	return s.dbManager.GetAPIKeysByUserID(userID)
+}
+
+// CreateAPIKey 创建API Key
+func (s *AuthService) CreateAPIKey(userID uint, name, keyValue, expiresAt string) (*db.APIKey, error) {
+	// 解析过期时间
+	var expiresAtTime *time.Time
+	if expiresAt != "" {
+		parsedTime, err := time.Parse("2006-01-02T15:04:05Z07:00", expiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("过期时间格式错误: %w", err)
+		}
+		expiresAtTime = &parsedTime
+	}
+
+	// 创建API Key
+	apiKey := &db.APIKey{
+		UserID:    userID,
+		Name:      name,
+		KeyValue:  keyValue,
+		IsEnabled: true,
+		ExpiresAt: expiresAtTime,
+	}
+
+	err := s.dbManager.CreateAPIKey(apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("创建API Key失败: %w", err)
+	}
+
+	return apiKey, nil
+}
+
+// DeleteAPIKey 删除API Key
+func (s *AuthService) DeleteAPIKey(apiKeyID, userID uint) error {
+	return s.dbManager.DeleteAPIKey(apiKeyID, userID)
+}
+
+// GetAPIKeyByValue 根据key值获取API Key
+func (s *AuthService) GetAPIKeyByValue(keyValue string) (*db.APIKey, error) {
+	return s.dbManager.GetAPIKeyByValue(keyValue)
+}
+
+// UpdateAPIKeyLastUsed 更新API Key最后使用时间
+func (s *AuthService) UpdateAPIKeyLastUsed(keyValue string) error {
+	return s.dbManager.UpdateAPIKeyLastUsed(keyValue)
+}

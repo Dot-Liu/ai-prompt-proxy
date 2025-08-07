@@ -48,7 +48,7 @@ func NewManager(dbPath string) (*Manager, error) {
 
 // migrate 执行数据库迁移
 func (m *Manager) migrate() error {
-	return m.db.AutoMigrate(&ModelConfigDB{}, &ConfigMetadata{}, &User{})
+	return m.db.AutoMigrate(&ModelConfigDB{}, &ConfigMetadata{}, &User{}, &APIKey{})
 }
 
 // SaveModelConfig 保存模型配置
@@ -313,4 +313,80 @@ func (m *Manager) Close() error {
 // GetDB 获取原始数据库连接（用于高级操作）
 func (m *Manager) GetDB() *gorm.DB {
 	return m.db
+}
+
+// CreateAPIKey 创建API Key
+func (m *Manager) CreateAPIKey(apiKey *APIKey) error {
+	result := m.db.Create(apiKey)
+	if result.Error != nil {
+		return fmt.Errorf("创建API Key失败: %w", result.Error)
+	}
+	return nil
+}
+
+// GetAPIKeysByUserID 根据用户ID获取API Key列表
+func (m *Manager) GetAPIKeysByUserID(userID uint) ([]APIKey, error) {
+	var apiKeys []APIKey
+	result := m.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&apiKeys)
+	if result.Error != nil {
+		return nil, fmt.Errorf("获取API Key列表失败: %w", result.Error)
+	}
+	return apiKeys, nil
+}
+
+// GetAPIKeyByValue 根据Key值获取API Key
+func (m *Manager) GetAPIKeyByValue(keyValue string) (*APIKey, error) {
+	var apiKey APIKey
+	result := m.db.Where("key_value = ? AND is_enabled = ?", keyValue, true).First(&apiKey)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("API Key不存在或已禁用")
+		}
+		return nil, fmt.Errorf("获取API Key失败: %w", result.Error)
+	}
+	return &apiKey, nil
+}
+
+// GetAPIKeyByID 根据ID获取API Key
+func (m *Manager) GetAPIKeyByID(id uint) (*APIKey, error) {
+	var apiKey APIKey
+	result := m.db.Where("id = ?", id).First(&apiKey)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("API Key不存在: %d", id)
+		}
+		return nil, fmt.Errorf("获取API Key失败: %w", result.Error)
+	}
+	return &apiKey, nil
+}
+
+// UpdateAPIKey 更新API Key
+func (m *Manager) UpdateAPIKey(apiKey *APIKey) error {
+	result := m.db.Save(apiKey)
+	if result.Error != nil {
+		return fmt.Errorf("更新API Key失败: %w", result.Error)
+	}
+	return nil
+}
+
+// DeleteAPIKey 删除API Key
+func (m *Manager) DeleteAPIKey(id uint, userID uint) error {
+	result := m.db.Where("id = ? AND user_id = ?", id, userID).Delete(&APIKey{})
+	if result.Error != nil {
+		return fmt.Errorf("删除API Key失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("API Key不存在或无权限删除: %d", id)
+	}
+	return nil
+}
+
+// UpdateAPIKeyLastUsed 更新API Key最后使用时间
+func (m *Manager) UpdateAPIKeyLastUsed(keyValue string) error {
+	now := time.Now()
+	result := m.db.Model(&APIKey{}).Where("key_value = ?", keyValue).Update("last_used_at", &now)
+	if result.Error != nil {
+		return fmt.Errorf("更新API Key最后使用时间失败: %w", result.Error)
+	}
+	return nil
 }

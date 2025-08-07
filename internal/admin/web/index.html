@@ -415,9 +415,17 @@
                                 </div>
                                 
                                 <div class="py-1">
+                                    <button id="api-key-management-btn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-3 transition-colors duration-200">
+                                        <i class="fas fa-code text-gray-400 w-4"></i>
+                                        <span>API Key管理</span>
+                                    </button>
                                     <button id="change-password-btn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-3 transition-colors duration-200">
                                         <i class="fas fa-key text-gray-400 w-4"></i>
                                         <span>修改密码</span>
+                                    </button>
+                                    <button id="system-settings-btn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-3 transition-colors duration-200" style="display: none;">
+                                        <i class="fas fa-cog text-gray-400 w-4"></i>
+                                        <span>系统设置</span>
                                     </button>
                                     <button id="logout-btn" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center space-x-3 transition-colors duration-200">
                                         <i class="fas fa-sign-out-alt text-red-400 w-4"></i>
@@ -933,6 +941,80 @@
         </div>
     </div>
 
+    <!-- API Key管理模态框 -->
+    <div id="api-key-modal" class="modal-backdrop fixed inset-0 bg-gradient-to-br from-green-900/90 via-teal-900/90 to-emerald-900/90 backdrop-blur-sm overflow-y-auto h-full w-full hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="relative w-full max-w-4xl bg-gradient-to-br from-white via-green-50/50 to-emerald-50/30 rounded-3xl shadow-2xl border border-green-200/50 scale-in">
+                <!-- 模态框头部 -->
+                <div class="flex justify-between items-center p-6 border-b border-gray-200/50">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-key text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900">API Key管理</h3>
+                            <p class="text-sm text-gray-500">管理您的API访问密钥</p>
+                        </div>
+                    </div>
+                    <button id="close-api-key-modal" class="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors">
+                        <i class="fas fa-times text-gray-500"></i>
+                    </button>
+                </div>
+                
+                <!-- 模态框内容 -->
+                <div class="p-6">
+                    <!-- 创建新API Key -->
+                    <div class="mb-6">
+                        <div class="rounded-2xl p-6 border border-green-200/60 shadow-lg" style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 25%, #86efac 50%, #dcfce7 100%)">
+                            <h4 class="text-lg font-semibold text-green-900 mb-4 flex items-center">
+                                <i class="fas fa-plus text-green-600 mr-2"></i>
+                                创建新API Key
+                            </h4>
+                            <form id="create-api-key-form" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label for="api-key-name" class="block text-sm font-semibold text-gray-700 mb-2">API Key名称 *</label>
+                                        <input type="text" id="api-key-name" name="name" required class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" placeholder="请输入API Key名称">
+                                    </div>
+                                    <div>
+                                        <label for="api-key-expires" class="block text-sm font-semibold text-gray-700 mb-2">过期时间</label>
+                                        <select id="api-key-expires" name="expires_in" class="w-full px-4 py-3 border-0 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300" style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)">
+                                            <option value="">永不过期</option>
+                                            <option value="30d">30天</option>
+                                            <option value="90d">90天</option>
+                                            <option value="1y">1年</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end">
+                                    <button type="submit" class="px-6 py-3 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300 hover:scale-105">
+                                        <i class="fas fa-plus mr-2"></i>
+                                        创建API Key
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <!-- API Key列表 -->
+                    <div class="rounded-2xl p-6 border border-blue-200/60 shadow-lg" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 25%, #93c5fd 50%, #dbeafe 100%)">
+                        <h4 class="text-lg font-semibold text-blue-900 mb-4 flex items-center">
+                            <i class="fas fa-list text-blue-600 mr-2"></i>
+                            我的API Keys
+                        </h4>
+                        <div id="api-keys-list" class="space-y-3">
+                            <!-- API Key项目将在这里动态生成 -->
+                            <div class="text-center py-8 text-gray-500">
+                                <i class="fas fa-key text-4xl mb-4 opacity-50"></i>
+                                <p>暂无API Key，请创建一个新的API Key</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 修改密码模态框 -->
     <div id="change-password-modal" class="modal-backdrop fixed inset-0 bg-gradient-to-br from-purple-900/90 via-indigo-900/90 to-blue-900/90 backdrop-blur-sm overflow-y-auto h-full w-full hidden z-50">
         <div class="flex items-center justify-center min-h-screen p-4">
@@ -970,6 +1052,48 @@
                             <button type="submit" class="px-6 py-3 bg-purple-600 text-white text-sm font-semibold rounded-xl hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-300 hover:scale-105">
                                 <i class="fas fa-save mr-2"></i>
                                 确认修改
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统设置模态框 -->
+    <div id="system-settings-modal" class="modal-backdrop fixed inset-0 bg-gradient-to-br from-orange-900/90 via-amber-900/90 to-yellow-900/90 backdrop-blur-sm overflow-y-auto h-full w-full hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="relative w-full max-w-md rounded-3xl shadow-2xl border border-orange-200/50 scale-in" style="background: linear-gradient(135deg, #ffffff 0%, #fef3c7 25%, #fde68a 50%, #fbbf24 75%, #ffffff 100%)">
+                <div class="p-6">
+                    <div class="text-center mb-6">
+                        <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-orange-100 mb-4">
+                            <i class="fas fa-cog text-2xl text-orange-600"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-900 mb-2">系统设置</h3>
+                        <p class="text-gray-600">配置系统接入地址</p>
+                    </div>
+                    
+                    <form id="system-settings-form" class="space-y-4">
+                        <div>
+                            <label for="system-access-url" class="block text-sm font-semibold text-gray-700 mb-2">系统接入地址</label>
+                            <input type="text" id="system-access-url" name="system_access_url" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all duration-300" placeholder="例如: https://api.example.com:8080">
+                            <p class="text-xs text-gray-500 mt-2">格式：协议+域名/IP+端口，配置后将作为模型接入地址的前缀</p>
+                        </div>
+                        
+                        <div class="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                            <h5 class="text-sm font-semibold text-orange-800 mb-2">说明</h5>
+                            <p class="text-xs text-orange-700">配置系统接入地址后，模型列表中的接入地址将显示为：</p>
+                            <p class="text-xs text-orange-700 font-mono mt-1">系统接入地址 + 服务商接入地址路径</p>
+                        </div>
+                        
+                        <div class="flex justify-center space-x-4 pt-4">
+                            <button type="button" id="cancel-system-settings" class="px-6 py-3 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-all duration-300">
+                                <i class="fas fa-times mr-2"></i>
+                                取消
+                            </button>
+                            <button type="submit" class="px-6 py-3 bg-orange-600 text-white text-sm font-semibold rounded-xl hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all duration-300 hover:scale-105">
+                                <i class="fas fa-save mr-2"></i>
+                                保存设置
                             </button>
                         </div>
                     </form>

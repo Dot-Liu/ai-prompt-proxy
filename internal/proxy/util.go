@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/config"
 	"github.com/tidwall/gjson"
@@ -121,11 +120,4 @@ func extractModelID(body []byte) string {
 		return result.String()
 	}
 	return ""
-}
-
-func getUpstreamURL(prefix string, path string) string {
-	// 这里可以根据需要配置不同的上游服务
-	// 示例：OpenAI API
-	return fmt.Sprintf("%s/%s", strings.TrimSuffix(prefix, "/"), strings.TrimPrefix(path, "/"))
-
 }

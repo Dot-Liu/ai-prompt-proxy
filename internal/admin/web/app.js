@@ -10,6 +10,12 @@ class AIPromptProxyAdmin {
         this.isAuthenticated = false;
         this.publicKey = null;
         
+        // 系统配置
+        this.systemConfig = {
+            proxy_port: '8082', // 默认值
+            admin_port: '8083'  // 默认值
+        };
+        
         // 用户管理相关属性
         this.users = [];
         this.filteredUsers = [];
@@ -90,6 +96,10 @@ class AIPromptProxyAdmin {
         if (mainApp) {
             mainApp.classList.remove('hidden');
             console.log('显示主应用页面');
+            
+            // 立即绑定用户下拉菜单事件，确保用户可以立即使用
+            this.bindUserDropdownEvents();
+            console.log('用户下拉菜单事件已绑定');
         } else {
             console.error('找不到主应用页面元素');
         }
@@ -101,6 +111,9 @@ class AIPromptProxyAdmin {
         // 设置默认视图为模型管理
         this.currentView = 'models';
         this.showModelManagement();
+        
+        // 加载系统配置
+        this.loadSystemConfig();
         
         this.loadModels();
         this.loadStatus();
@@ -328,6 +341,71 @@ class AIPromptProxyAdmin {
 
             // 用户管理相关事件绑定
             this.bindUserManagementEvents();
+
+            // 全局点击事件：关闭接入地址下拉菜单
+            document.addEventListener('click', (e) => {
+                // 检查点击的元素是否是下拉菜单按钮或下拉菜单内容
+                const isDropdownButton = e.target.closest('button[onclick*="toggleAccessUrlDropdown"]');
+                const isDropdownContent = e.target.closest('[id^="access-url-dropdown-"]');
+                
+                // 如果点击的不是下拉菜单相关元素，则关闭所有下拉菜单
+                if (!isDropdownButton && !isDropdownContent) {
+                    document.querySelectorAll('[id^="access-url-dropdown-"]').forEach(dropdown => {
+                        dropdown.classList.add('hidden');
+                    });
+                }
+            });
+
+            // 全局ESC键事件：关闭模态框
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    // 检查系统设置模态框是否打开
+                    const systemSettingsModal = document.getElementById('system-settings-modal');
+                    if (systemSettingsModal && !systemSettingsModal.classList.contains('hidden')) {
+                        this.closeSystemSettingsModal();
+                        return;
+                    }
+                    
+                    // 检查API Key管理模态框是否打开
+                    const apiKeyModal = document.getElementById('api-key-modal');
+                    if (apiKeyModal && !apiKeyModal.classList.contains('hidden')) {
+                        this.closeAPIKeyModal();
+                        return;
+                    }
+                    
+                    // 检查修改密码模态框是否打开
+                    const changePasswordModal = document.getElementById('change-password-modal');
+                    if (changePasswordModal && !changePasswordModal.classList.contains('hidden')) {
+                        this.closeChangePasswordModal();
+                        return;
+                    }
+                    
+                    // 检查其他模态框是否打开
+                    const modelModal = document.getElementById('model-modal');
+                    if (modelModal && !modelModal.classList.contains('hidden')) {
+                        this.closeModal();
+                        return;
+                    }
+                    
+                    const deleteModal = document.getElementById('delete-modal');
+                    if (deleteModal && !deleteModal.classList.contains('hidden')) {
+                        this.closeDeleteModal();
+                        return;
+                    }
+                    
+                    const userModal = document.getElementById('user-modal');
+                    if (userModal && !userModal.classList.contains('hidden')) {
+                        this.closeUserModal();
+                        return;
+                    }
+                    
+                    const deleteUserModal = document.getElementById('delete-user-modal');
+                    if (deleteUserModal && !deleteUserModal.classList.contains('hidden')) {
+                        this.closeDeleteUserModal();
+                        return;
+                    }
+                }
+            });
             
             console.log('事件绑定完成');
         } catch (error) {
@@ -343,25 +421,67 @@ class AIPromptProxyAdmin {
             const dropdownArrow = document.getElementById('dropdown-arrow');
 
             if (userMenuButton && userDropdownMenu) {
-                userMenuButton.addEventListener('click', (e) => {
+                // 移除可能存在的旧事件监听器
+                const newUserMenuButton = userMenuButton.cloneNode(true);
+                userMenuButton.parentNode.replaceChild(newUserMenuButton, userMenuButton);
+                
+                newUserMenuButton.addEventListener('click', (e) => {
                     e.stopPropagation();
                     this.toggleUserDropdown();
                 });
 
-                // 点击页面其他地方关闭下拉菜单
-                document.addEventListener('click', (e) => {
-                    if (!userMenuButton.contains(e.target) && !userDropdownMenu.contains(e.target)) {
-                        this.closeUserDropdown();
-                    }
-                });
+                // 为了避免重复绑定全局点击事件，我们使用一个标记
+                if (!this.globalClickBound) {
+                    // 点击页面其他地方关闭下拉菜单
+                    document.addEventListener('click', (e) => {
+                        const currentUserMenuButton = document.getElementById('user-menu-button');
+                        const currentUserDropdownMenu = document.getElementById('user-dropdown-menu');
+                        if (currentUserMenuButton && currentUserDropdownMenu) {
+                            if (!currentUserMenuButton.contains(e.target) && !currentUserDropdownMenu.contains(e.target)) {
+                                this.closeUserDropdown();
+                            }
+                        }
+                    });
+                    this.globalClickBound = true;
+                }
             }
 
             // 修改密码按钮
             const changePasswordBtn = document.getElementById('change-password-btn');
             if (changePasswordBtn) {
-                changePasswordBtn.addEventListener('click', () => {
+                // 移除可能存在的旧事件监听器
+                const newChangePasswordBtn = changePasswordBtn.cloneNode(true);
+                changePasswordBtn.parentNode.replaceChild(newChangePasswordBtn, changePasswordBtn);
+                
+                newChangePasswordBtn.addEventListener('click', () => {
                     this.closeUserDropdown();
                     this.openChangePasswordModal();
+                });
+            }
+
+            // API Key管理按钮
+            const apiKeyManagementBtn = document.getElementById('api-key-management-btn');
+            if (apiKeyManagementBtn) {
+                // 移除可能存在的旧事件监听器
+                const newApiKeyManagementBtn = apiKeyManagementBtn.cloneNode(true);
+                apiKeyManagementBtn.parentNode.replaceChild(newApiKeyManagementBtn, apiKeyManagementBtn);
+                
+                newApiKeyManagementBtn.addEventListener('click', () => {
+                    this.closeUserDropdown();
+                    this.openAPIKeyModal();
+                });
+            }
+
+            // 系统设置按钮
+            const systemSettingsBtn = document.getElementById('system-settings-btn');
+            if (systemSettingsBtn) {
+                // 移除可能存在的旧事件监听器
+                const newSystemSettingsBtn = systemSettingsBtn.cloneNode(true);
+                systemSettingsBtn.parentNode.replaceChild(newSystemSettingsBtn, systemSettingsBtn);
+                
+                newSystemSettingsBtn.addEventListener('click', () => {
+                    this.closeUserDropdown();
+                    this.openSystemSettingsModal();
                 });
             }
 
@@ -442,6 +562,35 @@ class AIPromptProxyAdmin {
             }
             if (dropdownUserEmail) {
                 dropdownUserEmail.textContent = this.currentUser.email || this.currentUser.username + '@example.com';
+            }
+
+            // 根据用户权限控制界面元素显示
+            const userManagementNav = document.getElementById('user-management-nav');
+            const apiKeyManagementBtn = document.getElementById('api-key-management-btn');
+            const systemSettingsBtn = document.getElementById('system-settings-btn');
+            
+            if (this.currentUser.is_admin) {
+                // 管理员：显示所有功能
+                if (userManagementNav) {
+                    userManagementNav.style.display = 'inline-flex';
+                }
+                if (apiKeyManagementBtn) {
+                    apiKeyManagementBtn.style.display = 'flex';
+                }
+                if (systemSettingsBtn) {
+                    systemSettingsBtn.style.display = 'flex';
+                }
+            } else {
+                // 普通用户：隐藏管理功能
+                if (userManagementNav) {
+                    userManagementNav.style.display = 'none';
+                }
+                if (apiKeyManagementBtn) {
+                    apiKeyManagementBtn.style.display = 'flex'; // 普通用户也可以管理自己的API Key
+                }
+                if (systemSettingsBtn) {
+                    systemSettingsBtn.style.display = 'none'; // 普通用户不能访问系统设置
+                }
             }
         }
     }
@@ -667,6 +816,23 @@ class AIPromptProxyAdmin {
         }
     }
 
+    async loadSystemConfig() {
+        try {
+            const response = await this.apiRequest('/config/system');
+            const config = response.data;
+            
+            // 更新系统配置
+            this.systemConfig.proxy_port = config.proxy_port;
+            this.systemConfig.admin_port = config.admin_port;
+            
+            console.log('系统配置已加载:', this.systemConfig);
+        } catch (error) {
+            console.error('加载系统配置失败:', error);
+            // 如果加载失败，使用默认值
+            console.log('使用默认系统配置:', this.systemConfig);
+        }
+    }
+
     filterModels() {
         const searchInput = document.getElementById('search-input');
         const typeFilter = document.getElementById('type-filter');
@@ -756,15 +922,6 @@ class AIPromptProxyAdmin {
                     </div>
                     <div class="flex items-start text-sm text-gray-600">
                         <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center mr-3 mt-0.5">
-                            <i class="fas fa-link text-gray-500"></i>
-                        </div>
-                        <div class="flex-1">
-                            <span class="font-semibold text-gray-700">服务商接入地址:</span>
-                            <p class="text-gray-900 break-all mt-1">${this.escapeHtml(model.url)}</p>
-                        </div>
-                    </div>
-                    <div class="flex items-start text-sm text-gray-600">
-                        <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center mr-3 mt-0.5">
                             <i class="fas fa-globe text-gray-500"></i>
                         </div>
                         <div class="flex-1">
@@ -801,6 +958,15 @@ class AIPromptProxyAdmin {
                                 <i class="fas fa-info-circle mr-1"></i>
                                 默认显示localhost地址，点击上方按钮查看更多IP选项
                             </p>
+                        </div>
+                    </div>
+                    <div class="flex items-start text-sm text-gray-600">
+                        <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center mr-3 mt-0.5">
+                            <i class="fas fa-link text-gray-500"></i>
+                        </div>
+                        <div class="flex-1">
+                            <span class="font-semibold text-gray-700">服务商接入地址:</span>
+                            <p class="text-gray-900 break-all mt-1">${this.escapeHtml(model.url)}</p>
                         </div>
                     </div>
                     ${model.prompt ? `
@@ -1180,21 +1346,22 @@ class AIPromptProxyAdmin {
 
     generateAccessUrl(serviceProviderUrl) {
         try {
-            // 获取当前浏览器的协议和端口
+            // 获取当前浏览器的协议和hostname
             const currentLocation = window.location;
             const protocol = currentLocation.protocol; // http: 或 https:
-            const port = currentLocation.port; // 端口号
+            const currentHostname = currentLocation.hostname;
+            // 使用动态获取的代理服务端口
+            const proxyPort = this.systemConfig.proxy_port;
             
             // 解析服务商接入地址，提取路径
             const url = new URL(serviceProviderUrl);
             const path = url.pathname;
             
             // 构建端口部分
-            const portPart = port ? `:${port}` : '';
+            const portPart = `:${proxyPort}`;
             
-            // 生成通用的接入地址模板，使用 {HOST} 作为占位符
-            // 用户可以将 {HOST} 替换为实际的IP地址或域名
-            return `${protocol}//{HOST}${portPart}${path}`;
+            // 生成基于当前浏览器hostname的接入地址
+            return `${protocol}//${currentHostname}${portPart}${path}`;
         } catch (error) {
             console.error('生成接入地址失败:', error);
             return '无效的服务商地址';
@@ -1203,22 +1370,66 @@ class AIPromptProxyAdmin {
 
     generateAccessUrlExamples(serviceProviderUrl) {
         try {
-            const currentLocation = window.location;
-            const protocol = currentLocation.protocol;
-            const port = currentLocation.port;
+            // 获取系统设置中配置的系统接入地址
+            const systemAccessUrl = localStorage.getItem('systemAccessUrl');
+            
             const url = new URL(serviceProviderUrl);
             const path = url.pathname;
-            const portPart = port ? `:${port}` : '';
             
-            // 生成常用的访问地址示例
+            // 如果配置了系统接入地址，优先使用它
+            if (systemAccessUrl && systemAccessUrl.trim()) {
+                try {
+                    // 确保系统接入地址以正确的格式结尾（不包含路径）
+                    const systemUrl = new URL(systemAccessUrl.trim());
+                    const systemBaseUrl = `${systemUrl.protocol}//${systemUrl.host}`;
+                    const primaryExample = `${systemBaseUrl}${path}`;
+                    
+                    // 仍然生成其他示例作为备选
+                    const currentLocation = window.location;
+                    const protocol = currentLocation.protocol;
+                    const currentHostname = currentLocation.hostname;
+                    const proxyPort = this.systemConfig.proxy_port;
+                    const portPart = `:${proxyPort}`;
+                    
+                    const examples = [
+                        primaryExample, // 系统配置的地址优先
+                        `${protocol}//${currentHostname}${portPart}${path}`, // 浏览器当前的hostname
+                        `${protocol}//localhost${portPart}${path}`,
+                        `${protocol}//127.0.0.1${portPart}${path}`,
+                        `${protocol}//192.168.1.100${portPart}${path}`,
+                        `${protocol}//your-domain.com${portPart}${path}`
+                    ];
+                    
+                    // 去重，避免重复的地址
+                    const uniqueExamples = [...new Set(examples)];
+                    
+                    return uniqueExamples;
+                } catch (urlError) {
+                    console.warn('系统接入地址格式不正确，使用默认生成方式:', urlError);
+                }
+            }
+            
+            // 如果没有配置系统接入地址或格式不正确，使用原有逻辑
+            const currentLocation = window.location;
+            const protocol = currentLocation.protocol;
+            const currentHostname = currentLocation.hostname;
+            // 使用动态获取的代理服务端口
+            const proxyPort = this.systemConfig.proxy_port;
+            const portPart = `:${proxyPort}`;
+            
+            // 生成接入地址示例，优先使用浏览器当前的IP/域名
             const examples = [
+                `${protocol}//${currentHostname}${portPart}${path}`, // 浏览器当前的hostname
                 `${protocol}//localhost${portPart}${path}`,
                 `${protocol}//127.0.0.1${portPart}${path}`,
                 `${protocol}//192.168.1.100${portPart}${path}`,
                 `${protocol}//your-domain.com${portPart}${path}`
             ];
             
-            return examples;
+            // 去重，避免重复的地址
+            const uniqueExamples = [...new Set(examples)];
+            
+            return uniqueExamples;
         } catch (error) {
             console.error('生成接入地址示例失败:', error);
             return [];
@@ -1951,6 +2162,114 @@ class AIPromptProxyAdmin {
         document.getElementById('change-password-form').reset();
     }
 
+    // 系统设置相关方法
+    openSystemSettingsModal() {
+        // 加载当前系统设置
+        this.loadSystemSettings();
+        
+        // 显示模态框
+        document.getElementById('system-settings-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        
+        // 绑定事件
+        this.bindSystemSettingsEvents();
+    }
+
+    closeSystemSettingsModal() {
+        document.getElementById('system-settings-modal').classList.add('hidden');
+        document.body.style.overflow = 'auto';
+        
+        // 清空表单
+        document.getElementById('system-settings-form').reset();
+    }
+
+    bindSystemSettingsEvents() {
+        // 关闭模态框按钮
+        const cancelBtn = document.getElementById('cancel-system-settings');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                this.closeSystemSettingsModal();
+            });
+        }
+
+        // 系统设置表单提交
+        const form = document.getElementById('system-settings-form');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveSystemSettings();
+            });
+        }
+
+        // 点击模态框外部关闭
+        const modal = document.getElementById('system-settings-modal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target.id === 'system-settings-modal') {
+                    this.closeSystemSettingsModal();
+                }
+            });
+        }
+    }
+
+    async loadSystemSettings() {
+        try {
+            // 从localStorage加载系统设置
+            const systemAccessUrl = localStorage.getItem('systemAccessUrl') || '';
+            const urlInput = document.getElementById('system-access-url');
+            if (urlInput) {
+                urlInput.value = systemAccessUrl;
+            }
+        } catch (error) {
+            console.error('加载系统设置失败:', error);
+        }
+    }
+
+    async saveSystemSettings() {
+        const form = document.getElementById('system-settings-form');
+        const formData = new FormData(form);
+        const systemAccessUrl = formData.get('system_access_url') || '';
+
+        // 验证URL格式（如果不为空）
+        if (systemAccessUrl && !this.isValidUrl(systemAccessUrl)) {
+            this.showToast('请输入有效的URL格式（例如：https://api.example.com:8080）', 'error');
+            return;
+        }
+
+        // 显示加载状态
+        const saveBtn = document.querySelector('#system-settings-form button[type="submit"]');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>保存中...';
+        saveBtn.disabled = true;
+
+        try {
+            // 保存到localStorage
+            localStorage.setItem('systemAccessUrl', systemAccessUrl);
+            
+            // 更新模型列表显示
+            this.loadModels();
+            
+            this.showToast('✅ 系统设置保存成功', 'success');
+            this.closeSystemSettingsModal();
+        } catch (error) {
+            this.showToast('❌ 保存系统设置失败: ' + error.message, 'error');
+            console.error('保存系统设置失败:', error);
+        } finally {
+            // 恢复按钮状态
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }
+    }
+
+    isValidUrl(string) {
+        try {
+            new URL(string);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     async savePassword() {
         const form = document.getElementById('change-password-form');
         const formData = new FormData(form);
@@ -2011,6 +2330,369 @@ class AIPromptProxyAdmin {
             // 恢复按钮状态
             saveBtn.innerHTML = originalText;
             saveBtn.disabled = false;
+        }
+    }
+
+    // API Key管理相关方法
+    openAPIKeyModal() {
+        document.getElementById('api-key-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        this.loadAPIKeys();
+        this.bindAPIKeyEvents();
+    }
+
+    closeAPIKeyModal() {
+        document.getElementById('api-key-modal').classList.add('hidden');
+        document.body.style.overflow = 'auto';
+    }
+
+    bindAPIKeyEvents() {
+        // 关闭模态框按钮
+        const closeBtn = document.getElementById('close-api-key-modal');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.closeAPIKeyModal();
+            });
+        }
+
+        // 创建API Key表单
+        const createForm = document.getElementById('create-api-key-form');
+        if (createForm) {
+            createForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.createAPIKey();
+            });
+        }
+    }
+
+    async loadAPIKeys() {
+        try {
+            const response = await this.apiRequest('/api-keys');
+            if (response.code === 0) {
+                this.renderAPIKeys(response.data?.api_keys || []);
+            }
+        } catch (error) {
+            console.error('加载API Keys失败:', error);
+            this.showToast('❌ 加载API Keys失败: ' + error.message, 'error');
+        }
+    }
+
+    renderAPIKeys(apiKeys) {
+        const container = document.getElementById('api-keys-list');
+        if (!container) return;
+
+        // 确保apiKeys是数组
+        if (!Array.isArray(apiKeys)) {
+            console.error('renderAPIKeys: apiKeys不是数组', typeof apiKeys, apiKeys);
+            apiKeys = [];
+        }
+
+        if (apiKeys.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8 text-gray-500">
+                    <i class="fas fa-key text-4xl mb-4 opacity-50"></i>
+                    <p>暂无API Key，请创建一个新的API Key</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = apiKeys.map(apiKey => `
+            <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                                <i class="fas fa-key text-green-600 text-sm"></i>
+                            </div>
+                            <div>
+                                <h5 class="font-semibold text-gray-900">${apiKey.name}</h5>
+                                <div class="flex items-center space-x-4 text-sm text-gray-500">
+                                    <span>创建时间: ${new Date(apiKey.created_at).toLocaleString()}</span>
+                                    ${apiKey.expires_at ? `<span>过期时间: ${new Date(apiKey.expires_at).toLocaleString()}</span>` : '<span>永不过期</span>'}
+                                    ${apiKey.last_used_at ? `<span>最后使用: ${new Date(apiKey.last_used_at).toLocaleString()}</span>` : '<span>从未使用</span>'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="app.deleteAPIKey(${apiKey.id}, '${apiKey.name}')" class="px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-lg hover:bg-red-200 transition-colors">
+                            <i class="fas fa-trash mr-1"></i>
+                            删除
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // 生成API Key
+    generateAPIKey() {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        let result = 'ak_';
+        for (let i = 0; i < 48; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    async createAPIKey() {
+        const form = document.getElementById('create-api-key-form');
+        const formData = new FormData(form);
+        const name = formData.get('name');
+        const expiresIn = formData.get('expires_in');
+
+        if (!name) {
+            this.showToast('请输入API Key名称', 'error');
+            return;
+        }
+
+        // 生成API Key
+        const generatedKey = this.generateAPIKey();
+        
+        // 显示确认界面
+        this.showAPIKeyConfirmation(name, expiresIn, generatedKey);
+    }
+
+    showAPIKeyConfirmation(name, expiresIn, generatedKey) {
+        // 创建确认界面
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+        modal.innerHTML = `
+            <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-xl font-bold text-gray-900">
+                            <i class="fas fa-key text-blue-600 mr-2"></i>
+                            确认创建 API Key
+                        </h2>
+                        <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <!-- API Key 信息 -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h3 class="text-sm font-semibold text-blue-900 mb-2">API Key 信息</h3>
+                            <div class="space-y-2 text-sm">
+                                <div><span class="font-medium">名称:</span> ${name}</div>
+                                <div><span class="font-medium">过期时间:</span> ${this.getExpiresText(expiresIn)}</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 生成的 API Key -->
+                        <div class="space-y-3">
+                            <label class="block text-sm font-medium text-gray-700">
+                                生成的 API Key
+                                <span class="text-red-500">*</span>
+                            </label>
+                            <div class="relative">
+                                <textarea 
+                                    id="generated-api-key" 
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm resize-none"
+                                    rows="3"
+                                    placeholder="API Key 将在这里显示..."
+                                >${generatedKey}</textarea>
+                                <button 
+                                    onclick="app.copyToClipboard(document.getElementById('generated-api-key').value, 'API Key')"
+                                    class="absolute top-2 right-2 px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200 transition-colors"
+                                >
+                                    <i class="fas fa-copy mr-1"></i>复制
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                您可以修改上面的 API Key，或者点击"重新生成"按钮生成新的
+                            </p>
+                        </div>
+                        
+                        <!-- 操作按钮 -->
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <button 
+                                onclick="document.getElementById('generated-api-key').value = app.generateAPIKey()"
+                                class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                            >
+                                <i class="fas fa-refresh mr-2"></i>重新生成
+                            </button>
+                            <div class="flex-1"></div>
+                            <button 
+                                onclick="this.closest('.fixed').remove()"
+                                class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                            >
+                                取消
+                            </button>
+                            <button 
+                                onclick="app.confirmCreateAPIKey('${name}', '${expiresIn}')"
+                                class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                                <i class="fas fa-check mr-2"></i>确认创建
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    getExpiresText(expiresIn) {
+        switch (expiresIn) {
+            case '1d': return '1天后过期';
+            case '7d': return '7天后过期';
+            case '30d': return '30天后过期';
+            case '90d': return '90天后过期';
+            case '1y': return '1年后过期';
+            default: return '永不过期';
+        }
+    }
+
+    async confirmCreateAPIKey(name, expiresIn) {
+        const keyValue = document.getElementById('generated-api-key').value.trim();
+        
+        if (!keyValue) {
+            this.showToast('请输入API Key', 'error');
+            return;
+        }
+
+        // 显示加载状态
+        const confirmBtn = event.target;
+        const originalText = confirmBtn.innerHTML;
+        confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>创建中...';
+        confirmBtn.disabled = true;
+
+        try {
+            const requestBody = { 
+                name,
+                key_value: keyValue
+            };
+            
+            // 处理过期时间
+            if (expiresIn && expiresIn !== '') {
+                const now = new Date();
+                let expiresAt;
+                
+                switch (expiresIn) {
+                    case '1d':
+                        expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+                        break;
+                    case '7d':
+                        expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '30d':
+                        expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '90d':
+                        expiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '1y':
+                        expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+                        break;
+                    default:
+                        expiresAt = null;
+                }
+                
+                if (expiresAt) {
+                    requestBody.expires_at = expiresAt.toISOString();
+                }
+            }
+
+            const response = await this.apiRequest('/api-keys', {
+                method: 'POST',
+                body: JSON.stringify(requestBody)
+            });
+
+            if (response.code === 0) {
+                this.showToast('✅ API Key创建成功', 'success');
+                
+                // 关闭确认界面
+                confirmBtn.closest('.fixed').remove();
+                
+                // 重置表单并刷新列表
+                const form = document.getElementById('create-api-key-form');
+                form.reset();
+                this.loadAPIKeys();
+                
+                // 显示成功创建的API Key
+                this.showNewAPIKey(keyValue);
+            }
+        } catch (error) {
+            console.error('创建API Key失败:', error);
+            this.showToast('❌ 创建失败: ' + error.message, 'error');
+        } finally {
+            // 恢复按钮状态
+            confirmBtn.innerHTML = originalText;
+            confirmBtn.disabled = false;
+        }
+    }
+
+    showNewAPIKey(keyValue) {
+        // 创建一个临时的提示框显示新创建的API Key
+        const toast = document.createElement('div');
+        toast.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl border border-green-200 p-6 z-50 max-w-md w-full mx-4';
+        toast.innerHTML = `
+            <div class="text-center">
+                <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-key text-green-600 text-xl"></i>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">API Key创建成功</h3>
+                <p class="text-sm text-gray-600 mb-4">请复制并保存您的API Key，它只会显示一次：</p>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+                    <code class="text-sm font-mono text-gray-800 break-all">${keyValue}</code>
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="app.copyToClipboard('${keyValue}', 'API Key'); this.parentElement.parentElement.parentElement.remove();" class="flex-1 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors">
+                        <i class="fas fa-copy mr-2"></i>
+                        复制并关闭
+                    </button>
+                    <button onclick="this.parentElement.parentElement.parentElement.remove();" class="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-300 transition-colors">
+                        关闭
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(toast);
+    }
+
+
+
+
+
+    toggleAccessUrlDropdown(modelId) {
+        const dropdown = document.getElementById(`access-url-dropdown-${modelId}`);
+        if (dropdown) {
+            const isHidden = dropdown.classList.contains('hidden');
+            
+            // 先关闭所有其他下拉菜单
+            document.querySelectorAll('[id^="access-url-dropdown-"]').forEach(otherDropdown => {
+                if (otherDropdown.id !== `access-url-dropdown-${modelId}`) {
+                    otherDropdown.classList.add('hidden');
+                }
+            });
+            
+            // 切换当前下拉菜单
+            if (isHidden) {
+                dropdown.classList.remove('hidden');
+            } else {
+                dropdown.classList.add('hidden');
+            }
+        }
+    }
+
+    async deleteAPIKey(keyId, keyName) {
+        if (!confirm(`确定要删除API Key "${keyName}" 吗？此操作无法撤销。`)) {
+            return;
+        }
+
+        try {
+            await this.apiRequest(`/api-keys/${keyId}`, {
+                method: 'DELETE'
+            });
+            this.showToast('✅ API Key删除成功', 'success');
+            this.loadAPIKeys();
+        } catch (error) {
+            console.error('删除API Key失败:', error);
+            this.showToast('❌ 删除失败: ' + error.message, 'error');
         }
     }
 }

@@ -7,23 +7,27 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/config"
+	"github.com/eolinker/ai-prompt-proxy/internal/service"
 )
 
 // Server 代理服务器
 type Server struct {
-	config     *config.Config
-	httpClient *http.Client
+	config      *config.Config
+	httpClient  *http.Client
+	authService *service.AuthService
 }
 
 // NewServer 创建新的代理服务器
-func NewServer(cfg *config.Config) *Server {
+func NewServer(cfg *config.Config, authService *service.AuthService) *Server {
 	return &Server{
-		config:     cfg,
-		httpClient: &http.Client{},
+		config:      cfg,
+		httpClient:  &http.Client{},
+		authService: authService,
 	}
 }
 
@@ -35,11 +39,79 @@ func (s *Server) Start(port string) error {
 	// 添加中间件
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+	r.Use(s.apiKeyAuthMiddleware()) // 添加API Key验证中间件
 
 	// 代理所有请求
 	r.Any("/*path", s.proxyHandler)
 
 	return r.Run("0.0.0.0:" + port)
+}
+
+// apiKeyAuthMiddleware API Key验证中间件
+func (s *Server) apiKeyAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 获取X-Proxy-Key头部
+		apiKey := c.GetHeader("X-Proxy-Key")
+		if apiKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "缺少API Key，请在请求头中添加X-Proxy-Key",
+			})
+			c.Abort()
+			return
+		}
+
+		// 验证API Key
+		if s.authService == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "认证服务不可用",
+			})
+			c.Abort()
+			return
+		}
+
+		// 从数据库获取API Key信息
+		apiKeyInfo, err := s.authService.GetAPIKeyByValue(apiKey)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "无效的API Key",
+			})
+			c.Abort()
+			return
+		}
+
+		// 检查API Key是否启用
+		if !apiKeyInfo.IsEnabled {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "API Key已被禁用",
+			})
+			c.Abort()
+			return
+		}
+
+		// 检查API Key是否过期
+		if apiKeyInfo.ExpiresAt != nil && time.Now().After(*apiKeyInfo.ExpiresAt) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "API Key已过期",
+			})
+			c.Abort()
+			return
+		}
+
+		// 更新API Key最后使用时间（异步执行，不影响请求性能）
+		go func() {
+			if err := s.authService.UpdateAPIKeyLastUsed(apiKey); err != nil {
+				// 记录错误但不影响请求
+				fmt.Printf("更新API Key最后使用时间失败: %v\n", err)
+			}
+		}()
+
+		// 将API Key信息存储到上下文中，供后续使用
+		c.Set("api_key_info", apiKeyInfo)
+		c.Set("user_id", apiKeyInfo.UserID)
+
+		// 继续处理请求
+		c.Next()
+	}
 }
 
 // proxyHandler 代理请求处理器
@@ -57,34 +129,28 @@ func (s *Server) proxyHandler(c *gin.Context) {
 	// 查找模型配置
 	modelConfig, exists := s.config.GetModel(modelID)
 
-	var modifiedBody []byte
-	var upstreamURL string
-
-	if exists {
-		// 如果找到模型配置，注入Prompt并替换模型ID
-		modifiedBody, err = injectPrompt(body, modelConfig)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("注入Prompt失败: %v", err)})
-			return
-		}
-
-		// 修改模型ID为目标模型ID
-		modifiedBody, err = replaceModelID(modifiedBody, modelConfig.Target)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("替换模型ID失败: %v", err)})
-			return
-		}
-
-		// 使用模型配置中的URL
-		upstreamURL = getUpstreamURL(modelConfig.Url, c.Request.URL.Path)
-	} else {
-		// 如果没有找到模型配置，直接使用原始请求体
-		modifiedBody = body
-
-		// 没有模型配置时，返回错误或使用默认URL
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("未找到模型配置: %s", modelID)})
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("转发请求失败: %v", err)})
 		return
 	}
+
+	// 如果找到模型配置，注入Prompt并替换模型ID
+	modifiedBody, err := injectPrompt(body, modelConfig)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("注入Prompt失败: %v", err)})
+		return
+	}
+
+	// 修改模型ID为目标模型ID
+	modifiedBody, err = replaceModelID(modifiedBody, modelConfig.Target)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("替换模型ID失败: %v", err)})
+		return
+	}
+
+	// 使用模型配置中的URL
+	upstreamURL := modelConfig.Url
+
 	// 转发请求到上游服务
 	if err := s.forwardRequest(c, upstreamURL, modifiedBody); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("转发请求失败: %v", err)})

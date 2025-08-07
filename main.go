@@ -31,13 +31,19 @@ func main() {
 	// 获取配置
 	cfg := configService.GetConfig()
 
+	// 创建认证服务（代理服务器需要用到）
+	authService, err := service.NewAuthService(configService.GetDBManager())
+	if err != nil {
+		log.Fatalf("创建认证服务失败: %v", err)
+	}
+
 	var wg sync.WaitGroup
 
 	// 启动代理服务器
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		proxyServer := proxy.NewServer(cfg)
+		proxyServer := proxy.NewServer(cfg, authService)
 		log.Printf("AI Prompt Proxy 启动在端口 %s", *proxyPort)
 		if err := proxyServer.Start(*proxyPort); err != nil {
 			log.Fatalf("启动代理服务器失败: %v", err)
@@ -48,7 +54,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		adminServer, err := admin.NewAdminServerWithService(configService, *configDir)
+		adminServer, err := admin.NewAdminServerWithService(configService, *configDir, *proxyPort, *adminPort)
 		if err != nil {
 			log.Fatalf("创建管理API服务器失败: %v", err)
 		}
