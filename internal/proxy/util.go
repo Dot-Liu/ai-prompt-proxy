@@ -14,6 +14,8 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 	bodyStr := string(body)
 	val := cfg.PromptValue
 	valType := cfg.PromptValueType
+	promptPath := cfg.PromptPath
+	
 	if val == nil {
 		switch cfg.Type {
 		case config.ModelTypeChat:
@@ -22,6 +24,9 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 				"content": cfg.Prompt,
 			}
 			valType = config.ValueTypeArray
+			if promptPath == "" {
+				promptPath = "messages"
+			}
 		case config.ModelTypeImage, config.ModelTypeAudio:
 			val = cfg.Prompt
 			valType = config.ValueTypeString
@@ -29,10 +34,21 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 			return nil, fmt.Errorf("unsupported model type: %s", cfg.Type)
 		}
 	}
+	
+	// 如果PromptPath为空，根据模型类型设置默认路径
+	if promptPath == "" {
+		switch cfg.Type {
+		case config.ModelTypeChat:
+			promptPath = "messages"
+		default:
+			// 对于其他类型，如果没有指定路径，直接返回原body
+			return body, nil
+		}
+	}
 	typ := reflect.TypeOf(val)
 	switch typ.Kind() {
 	case reflect.Map:
-		result := gjson.Get(bodyStr, cfg.PromptPath)
+		result := gjson.Get(bodyStr, promptPath)
 		switch {
 		case result.IsArray():
 			// 将cfg.PromptValue添加到数组首位
@@ -42,7 +58,7 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 			for _, v := range arr {
 				vs = append(vs, v.Value())
 			}
-			data, err := sjson.Set(bodyStr, cfg.PromptPath, vs)
+			data, err := sjson.Set(bodyStr, promptPath, vs)
 			if err != nil {
 				return nil, err
 			}
@@ -53,14 +69,14 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 				vs := make([]interface{}, 0, +1)
 				vs = append(vs, val)
 				// 如果路径不存在，则直接设置为数组
-				data, err := sjson.Set(bodyStr, cfg.PromptPath, vs)
+				data, err := sjson.Set(bodyStr, promptPath, vs)
 				if err != nil {
 					return nil, err
 				}
 				return []byte(data), nil
 			case config.ValueTypeObject:
 				// 如果路径不存在，则直接设置为对象
-				data, err := sjson.Set(bodyStr, cfg.PromptPath, val)
+				data, err := sjson.Set(bodyStr, promptPath, val)
 				if err != nil {
 					return nil, err
 				}
@@ -68,7 +84,7 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 			case config.ValueTypeString:
 				// 如果路径不存在，则直接设置为字符串
 				v, err := json.Marshal(val)
-				data, err := sjson.Set(bodyStr, cfg.PromptPath, v)
+				data, err := sjson.Set(bodyStr, promptPath, v)
 				if err != nil {
 					return nil, err
 				}
@@ -77,27 +93,27 @@ func injectPrompt(body []byte, cfg *config.ModelConfig) ([]byte, error) {
 				return nil, fmt.Errorf("unsupported prompt value type: %s", valType)
 			}
 		default:
-			return nil, fmt.Errorf("prompt path %s is not an array", cfg.PromptPath)
+			return nil, fmt.Errorf("prompt path %s is not an array", promptPath)
 		}
 	case reflect.String:
-		result := gjson.Get(bodyStr, cfg.PromptPath)
+		result := gjson.Get(bodyStr, promptPath)
 		switch result.Type {
 		case gjson.String:
 			// 将cfg.PromptValue添加到字符串前
-			data, err := sjson.Set(bodyStr, cfg.PromptPath, fmt.Sprintf("%s\n%s", val.(string), result.String()))
+			data, err := sjson.Set(bodyStr, promptPath, fmt.Sprintf("%s\n%s", val.(string), result.String()))
 			if err != nil {
 				return nil, err
 			}
 			return []byte(data), nil
 		case gjson.Null:
 			// 如果路径不存在，则直接设置
-			data, err := sjson.Set(bodyStr, cfg.PromptPath, val.(string))
+			data, err := sjson.Set(bodyStr, promptPath, val.(string))
 			if err != nil {
 				return nil, err
 			}
 			return []byte(data), nil
 		default:
-			return nil, fmt.Errorf("prompt path %s is not a string", cfg.PromptPath)
+			return nil, fmt.Errorf("prompt path %s is not a string", promptPath)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported prompt value type: %s", typ.Kind())

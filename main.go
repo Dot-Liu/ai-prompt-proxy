@@ -9,9 +9,44 @@ import (
 	"syscall"
 
 	"github.com/eolinker/ai-prompt-proxy/internal/admin"
+	"github.com/eolinker/ai-prompt-proxy/internal/logger"
 	"github.com/eolinker/ai-prompt-proxy/internal/proxy"
 	"github.com/eolinker/ai-prompt-proxy/internal/service"
 )
+
+// initDefaultLogger 初始化默认日志记录器
+func initDefaultLogger() {
+	// 创建默认的日志配置
+	defaultConfig := logger.OutputConfig{
+		Name:        "default",
+		Driver:      "file",
+		Description: "默认访问日志",
+		Enabled:     true,
+		Type:        logger.FormatterJSON,
+		File:        "access.log",
+		Dir:         "./logs",
+		Period:      logger.PeriodHour,
+		Expire:      3, // 保留30天
+		Formatter: logger.FormatterConfig{
+			Fields: map[string][]string{
+				"default": {
+					"$request_id", "$timestamp", "$method", "$path", "$user_agent",
+					"$client_ip", "$api_key", "$user_id", "$request_size", "$request_body",
+					"$model_id", "$target_model", "$proxy_url", "$proxy_scheme", "$proxy_host",
+					"$upstream_body", "$status_code", "$response_size", "$response_time",
+					"$response_body", "$error",
+				},
+			},
+		},
+	}
+
+	// 添加默认日志记录器
+	if err := logger.GlobalLoggerManager.AddLogger("default", defaultConfig); err != nil {
+		log.Printf("初始化默认日志记录器失败: %v", err)
+	} else {
+		log.Println("默认日志记录器初始化成功")
+	}
+}
 
 func main() {
 	var (
@@ -36,6 +71,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建认证服务失败: %v", err)
 	}
+
+	// 初始化默认日志记录器
+	initDefaultLogger()
 
 	var wg sync.WaitGroup
 
@@ -72,7 +110,14 @@ func main() {
 	go func() {
 		<-sigChan
 		log.Println("收到退出信号，正在关闭服务...")
-		// 这里可以添加优雅关闭逻辑
+
+		// 关闭日志记录器
+		if err := logger.GlobalLoggerManager.Close(); err != nil {
+			log.Printf("关闭日志记录器失败: %v", err)
+		} else {
+			log.Println("日志记录器已关闭")
+		}
+
 		os.Exit(0)
 	}()
 
